@@ -33,7 +33,14 @@ blendscape validate plan.json                            # where each transition
 blendscape render plan.json -o mix.wav --bit-depth 24
 ```
 
-Tracks are blended in the order given. Each transition beat-matches the two tracks (the tempo glides from the
+Tracks are blended in the order given. Where each transition happens is chosen from the songs' structure: `analyze`
+lists the detected sections (intro / body / breakdown / outro), and the planner scores every phrase-aligned pair of
+leave/enter points. It prefers leaving from an outro (or into a breakdown) late in the outgoing track, entering through
+the incoming track's intro with its drop landing as the overlap ends, and little bass in both tracks at once.
+`--explain` lists the runner-up choices; `--mix-points latest` turns the scoring off and just leaves on the last phrase
+that fits.
+
+Each transition Each transition beat-matches the two tracks (the tempo glides from the
 outgoing track's BPM to the incoming one's over the overlap), lines up their downbeats, and swaps the bass, mids and
 highs at different moments. Options: `--overlap-beats` (default 32 = 8 bars), `--style bass_swap|crossfade`,
 `--phrase-bars` (default 8), `--sample-rate`, `--bit-depth 16|24|32`, `--ceiling-db`.
@@ -45,7 +52,10 @@ highs at different moments. Options: `--overlap-beats` (default 32 = 8 bars), `-
 - `tracks[]`: `bpm`, `offset_s` (time of beat 0) and `downbeat` (0-3, which beat starts a bar) come from analysis;
   correct them by hand if detection got a track wrong.
 - `transitions[]`: `out_beat` (where the overlap starts in the outgoing track), `in_beat` (the incoming track's beat
-  that lands there), `overlap_beats`, `style`, and `eq` (when each band fades, as fractions of the overlap).
+  that lands there), `overlap_beats`, `style`, and `eq` (when each band fades, as fractions of the overlap). The planner
+  also records `score`, `note` (why it chose this) and `alternatives` (runners-up you can swap in); these are
+  informational and ignored when rendering.
+- `tracks[].sections`: the detected structure, informational.
 
 `blendscape validate` checks the plan and prints the mix times. Analysis results are cached by file content in
 `~/.cache/blendscape` (override with `$BLENDSCAPE_CACHE`).

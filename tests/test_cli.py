@@ -20,6 +20,48 @@ def test_analyze_json(tracks, capsys):
     assert [round(d["bpm"]) for d in data] == [124, 128]
 
 
+def test_analyze_lists_the_detected_sections(tracks, capsys):
+    assert main(["analyze", tracks["a"][0]]) == 0
+    out = capsys.readouterr().out
+    assert "intro 0-8" in out and "body 8-" in out
+
+
+def test_plan_explain_shows_score_and_runner_ups(tracks, tmp_path, capsys):
+    plan = tmp_path / "plan.json"
+    assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16", "--explain"]) == 0
+    out = capsys.readouterr().out
+    assert "score" in out and "alt:" in out
+    d = json.loads(plan.read_text())
+    assert d["transitions"][0]["score"] > 0 and d["transitions"][0]["alternatives"]
+    assert d["tracks"][0]["sections"]
+
+
+def test_plan_without_explain_hides_runner_ups(tracks, tmp_path, capsys):
+    plan = tmp_path / "plan.json"
+    main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16"])
+    out = capsys.readouterr().out
+    assert "score" in out and "alt:" not in out
+
+
+def test_latest_mix_points_option(tracks, tmp_path, capsys):
+    plan = tmp_path / "plan.json"
+    assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--mix-points", "latest"]) == 0
+    assert json.loads(plan.read_text())["transitions"][0]["score"] is None
+
+
+def test_big_tempo_gap_is_called_out(tracks, tmp_path, capsys):
+    import soundfile as sf
+
+    from synth import make_track
+
+    slow = tmp_path / "slow.wav"
+    make_track(slow, 100.0, 0.2, 55.0)
+    plan = tmp_path / "plan.json"
+    assert main(["plan", tracks["a"][0], str(slow), "-o", str(plan), "--overlap-beats", "16"]) == 0
+    assert "WARNING: tempo gap" in capsys.readouterr().out
+    assert sf.info(slow).duration > 10
+
+
 def test_plan_then_validate(tracks, tmp_path, capsys):
     plan = tmp_path / "plan.json"
     assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16"]) == 0

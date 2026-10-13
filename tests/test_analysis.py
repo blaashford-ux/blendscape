@@ -52,3 +52,19 @@ def test_beatless_audio_is_reported_not_crashed(tmp_path):
         analyze(p)  # may "succeed" with a meaningless grid, but must not raise anything but AnalysisError
     except AnalysisError:
         pass
+
+
+def test_song_structure_is_detected_on_the_synthetic_tracks(tracks):
+    r = analyze(tracks["a"][0])
+    secs = [(s["label"], s["start_bar"], s["end_bar"]) for s in r.sections]
+    # synthetic layout: intro 8 bars | body 8 bars | outro 8 bars (the kick fades through the outro)
+    assert [s[0] for s in secs] == ["intro", "body", "outro"]
+    assert secs[0][:2] == ("intro", 0) and secs[0][2] == 8
+    assert secs[1][1] == 8
+    # The kick fades out linearly from bar 16, and the detector only calls it an outro once the loudness has
+    # dropped clearly below the body, so a gradual fade is labelled late (known limitation, see docs/PLAN.md).
+    assert 16 <= secs[2][1] < 24
+    assert secs[-1][2] == len(r.bar_low)
+    assert len(r.bar_low) == len(r.bar_mid) == len(r.bar_high) == len(r.bar_rms)
+    # kick and bass live in the low band: silent in the intro, strong in the body
+    assert max(r.bar_low[:8]) < 0.1 * max(r.bar_low[8:16])
