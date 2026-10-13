@@ -1,34 +1,105 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Beat-map time warping on top of Rubber Band's C API (via ctypes, offline engine + key-frame map).
+"""Beat-map time warping on top of Rubber Band (R3 engine, offline mode, key-frame/time map).
 
-pylibrb does not expose set_keyframe_map (missing std::map binding), and the real-time engine's
-latency depends on the current ratio, so we call librubberband directly. Offline mode with a
-key-frame map places source anchors at exact output samples."""
+Two interchangeable backends, both sample-accurate:
+  * "cli":    the `rubberband` executable with --timemap (works on Windows/macOS/Linux; set RUBBERBAND=path if not on PATH)
+  * "ctypes": the librubberband C API (Linux/macOS with the shared library installed)
+pylibrb is not usable: it does not expose set_keyframe_map, and the real-time engine's latency depends on the ratio."""
 import ctypes as C
 import ctypes.util
+import os
+import shutil
+import subprocess
+import tempfile
 import numpy as np
-from pylibrb import Option
+import soundfile as sf
 
-_lib = C.CDLL(ctypes.util.find_library("rubberband") or "librubberband.so.2")
-_lib.rubberband_new.restype = C.c_void_p
-_lib.rubberband_new.argtypes = [C.c_uint, C.c_uint, C.c_int, C.c_double, C.c_double]
-for _n in ("delete", "study", "process", "retrieve", "available", "set_expected_input_duration",
-           "set_key_frame_map", "get_samples_required", "set_max_process_size"):
-    getattr(_lib, "rubberband_" + _n)
-_lib.rubberband_available.argtypes = [C.c_void_p]
-_lib.rubberband_available.restype = C.c_int
-_lib.rubberband_retrieve.argtypes = [C.c_void_p, C.POINTER(C.POINTER(C.c_float)), C.c_uint]
-_lib.rubberband_retrieve.restype = C.c_uint
-_lib.rubberband_study.argtypes = [C.c_void_p, C.POINTER(C.POINTER(C.c_float)), C.c_uint, C.c_int]
-_lib.rubberband_process.argtypes = [C.c_void_p, C.POINTER(C.POINTER(C.c_float)), C.c_uint, C.c_int]
-_lib.rubberband_set_expected_input_duration.argtypes = [C.c_void_p, C.c_uint]
-_lib.rubberband_set_key_frame_map.argtypes = [C.c_void_p, C.c_uint, C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
-_lib.rubberband_delete.argtypes = [C.c_void_p]
-_lib.rubberband_set_time_ratio.argtypes = [C.c_void_p, C.c_double]
+try:
+    _lib = C.CDLL(ctypes.util.find_library("rubberband") or "librubberband.so.2")
+except OSError:
+    _lib = None
+
+if _lib is not None:
+    _lib.rubberband_new.restype = C.c_void_p
+    _lib.rubberband_new.argtypes = [C.c_uint, C.c_uint, C.c_int, C.c_double, C.c_double]
+    _lib.rubberband_available.argtypes = [C.c_void_p]
+    _lib.rubberband_available.restype = C.c_int
+    _lib.rubberband_retrieve.argtypes = [C.c_void_p, C.POINTER(C.POINTER(C.c_float)), C.c_uint]
+    _lib.rubberband_retrieve.restype = C.c_uint
+    _lib.rubberband_study.argtypes = [C.c_void_p, C.POINTER(C.POINTER(C.c_float)), C.c_uint, C.c_int]
+    _lib.rubberband_process.argtypes = [C.c_void_p, C.POINTER(C.POINTER(C.c_float)), C.c_uint, C.c_int]
+    _lib.rubberband_set_expected_input_duration.argtypes = [C.c_void_p, C.c_uint]
+    _lib.rubberband_set_key_frame_map.argtypes = [C.c_void_p, C.c_uint, C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
+    _lib.rubberband_delete.argtypes = [C.c_void_p]
 
 BLOCK = 8192
-OPTS = int(Option.PROCESS_OFFLINE | Option.ENGINE_FINER | Option.TRANSIENTS_CRISP | Option.DETECTOR_PERCUSSIVE |
-           Option.WINDOW_SHORT | Option.CHANNELS_TOGETHER)
+# RubberBandOption flags (rubberband-c.h): ProcessOffline=0, EngineFiner=0x20000000, WindowShort=0x100000,
+# DetectorPercussive=0x400, ChannelsTogether=0x10000000
+OPTS = 0x20000000 | 0x100000 | 0x400 | 0x10000000
+
+
+def _cli_path():
+    return os.environ.get("RUBBERBAND") or shutil.which("rubberband") or shutil.which("rubberband.exe")
+
+
+def backend():
+    if _cli_path():
+        return "cli"
+    if _lib is not None:
+        return "ctypes"
+    raise RuntimeError("Rubber Band not found: put the `rubberband` executable on PATH (or set RUBBERBAND=path), "
+                       "or install librubberband.")
+
+
+def _prepare(audio, src_pts, dst_pts):
+    """Shared key-frame preparation. Returns (x (ch,n) float32, keys list, targets list, lead samples)."""
+    x = np.ascontiguousarray(audio.T.astype(np.float32))
+    n = x.shape[1]
+    src = [int(round(s)) for s in src_pts]
+    dst = [int(round(d)) for d in dst_pts]
+    shift = dst[0] - src[0]
+    lead, cut = max(0, shift), max(0, -shift)
+    if cut:
+        x = np.ascontiguousarray(x[:, cut:])
+        src = [s - cut for s in src]
+        n = x.shape[1]
+    kf = {0: 0}
+    for s, d in zip(src, dst):
+        kf[s] = d - lead
+    kf[n] = kf[src[-1]] + (n - src[-1])
+    kf = dict(sorted((k, v) for k, v in kf.items() if 0 <= k <= n))
+    keys = []
+    for k in sorted(kf):
+        if not keys or kf[k] > kf[keys[-1]]:
+            keys.append(k)
+    return x, keys, [kf[k] for k in keys], lead
+
+
+def _warp_cli(x, sr, keys, tos):
+    with tempfile.TemporaryDirectory() as td:
+        fin, fout, fmap = (os.path.join(td, n) for n in ("in.wav", "out.wav", "map.txt"))
+        sf.write(fin, x.T, sr, subtype="FLOAT")
+        with open(fmap, "w") as f:
+            f.write("".join(f"{k} {t}\n" for k, t in zip(keys, tos)))
+        ratio = repr(tos[-1] / keys[-1])  # overall output/input duration; the time map shapes it
+        subprocess.run([_cli_path(), "-3", "-q", "-t", ratio, "-M", fmap, fin, fout], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        y, _ = sf.read(fout, dtype="float32", always_2d=True)
+    return y
+
+
+def warp(audio, sr, src_pts, dst_pts):
+    """Warp audio (n, ch) so source sample src_pts[i] lands on output sample dst_pts[i]
+    (increasing; output index 0 == dst coordinate 0). Ratio is 1 outside the given points. Returns (m, ch) float32."""
+    x, keys, tos, lead = _prepare(audio, src_pts, dst_pts)
+    ch, n = x.shape
+    if backend() == "cli":
+        y = _warp_cli(x, sr, keys, tos)
+    else:
+        y = _warp_ctypes(x, sr, keys, tos)
+    if lead:
+        y = np.concatenate([np.zeros((lead, ch), np.float32), y])
+    return y
 
 
 def _ptrs(planar, a, b):
@@ -38,41 +109,11 @@ def _ptrs(planar, a, b):
     return arr
 
 
-def warp(audio, sr, src_pts, dst_pts):
-    """Warp audio (n, ch) so source sample src_pts[i] lands on output sample dst_pts[i]
-    (increasing; both in samples, output index 0 == dst coordinate 0). Outside the given points the
-    ratio is 1. Returns (m, ch) float32."""
-    x = np.ascontiguousarray(audio.T.astype(np.float32))
+def _warp_ctypes(x, sr, keys, tos):
     ch, n = x.shape
-    src = [int(round(s)) for s in src_pts]
-    dst = [int(round(d)) for d in dst_pts]
-    # source samples that land before output 0 are dropped; if the first anchor lands later, lead with silence
-    shift = dst[0] - src[0]
-    lead, cut = max(0, shift), max(0, -shift)
-    if cut:
-        x = np.ascontiguousarray(x[:, cut:])
-        src = [s - cut for s in src]
-        dst = [d - 0 for d in dst]
-        n = x.shape[1]
-    # key frames are in (trimmed input, output-without-lead) coordinates
-    off = lead
-    kf = {0: 0}
-    for s, d in zip(src, dst):
-        kf[s] = d - off
-    kf[n] = kf[src[-1]] + (n - src[-1])
-    kf = dict(sorted((k, v) for k, v in kf.items() if 0 <= k <= n))
-    keys = sorted(kf)
-    # drop non-monotonic maps (defensive)
-    ok = [keys[0]]
-    for k in keys[1:]:
-        if kf[k] > kf[ok[-1]]:
-            ok.append(k)
-    keys = ok
     frm = (C.c_uint * len(keys))(*keys)
-    to = (C.c_uint * len(keys))(*[kf[k] for k in keys])
-    total_out = kf[keys[-1]]
-
-    st = _lib.rubberband_new(sr, ch, OPTS, total_out / n, 1.0)
+    to = (C.c_uint * len(keys))(*tos)
+    st = _lib.rubberband_new(sr, ch, OPTS, tos[-1] / n, 1.0)
     try:
         _lib.rubberband_set_expected_input_duration(st, n)
         _lib.rubberband_set_key_frame_map(st, len(keys), frm, to)
@@ -97,7 +138,4 @@ def warp(audio, sr, src_pts, dst_pts):
         drain()
     finally:
         _lib.rubberband_delete(st)
-    y = np.concatenate(outs, axis=1).T
-    if lead:
-        y = np.concatenate([np.zeros((lead, ch), np.float32), y])
-    return y
+    return np.concatenate(outs, axis=1).T
