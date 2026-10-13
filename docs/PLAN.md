@@ -96,19 +96,30 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-Status: **0 spike done; 1 core engine and CLI done** (`feature/core-engine`); 2-5 to do.
+Status: **0 spike, 1 core engine and CLI, 2 smart mix points done** (2 is on `feature/smart-mix-points`); 3-5 to do.
 
 0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
    sounds like a DJ mix on 3+ track pairs.
 1. **Core engine + CLI. Done.** `analyze`, hand-written `mix_plan.json`, `render`. Unit tests on
    grid math and alignment (synthetic click tracks with known BPM/offset).
-2. **Planner + smart mix points.** Section detection, candidate scoring, defaults from the
+2. **Planner + smart mix points. Done.** Section detection, candidate scoring, defaults from the
    user's overlap setting.
 3. **API.** Projects, jobs, plan CRUD, preview/final render.
 4. **GUI.** Track list, waveform/beat grid, transition editor, preview, export.
 5. **Hardening.** Low-confidence handling, big-BPM-gap handling, loudness normalisation,
    performance (long tracks, caching), packaging.
+
+### Milestone 2 notes
+
+- Per-bar low/mid/high loudness -> novelty-based boundaries, snapped to the 8-bar phrase grid -> labelled by
+  loudness relative to the loud parts of the track (`src/blendscape/sections.py`).
+- The planner (`src/blendscape/planner.py`) scores every phrase-aligned (out, in) pair on: outgoing section, incoming
+  section (and whether the drop lands as the overlap ends), bass clash, and how much of each track is played. Weights
+  are constants at the top of the file and still need tuning on real music.
+- Known limits: gradual fade-outs are labelled as outro late; mixes are chosen greedily transition by transition (no
+  look-ahead beyond leaving the next track room to exit); a track with no clear structure falls back to "leave
+  late, enter at the start"; the section labels assume club-style 4/4 arrangements.
 
 ## Testing approach
 

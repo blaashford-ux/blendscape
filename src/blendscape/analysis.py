@@ -10,10 +10,12 @@ from pathlib import Path
 
 import librosa
 import numpy as np
+from scipy.signal import butter, sosfilt
 
 from .audio import load_audio
+from .sections import detect_sections
 
-ANALYSIS_VERSION = 1
+ANALYSIS_VERSION = 2
 HOP = 64
 NFFT = 1024
 MIN_DURATION_S = 10.0
@@ -33,6 +35,10 @@ class TrackAnalysis:
     downbeat: int  # beat index (0..3) that starts a bar
     downbeat_confidence: float  # best / second-best phase score; ~1.0 means "could be any beat"
     bar_rms: list[float] = field(default_factory=list)  # loudness per bar from the first downbeat
+    bar_low: list[float] = field(default_factory=list)  # per-bar RMS of the low band (<150 Hz: kick and bass)
+    bar_mid: list[float] = field(default_factory=list)  # ... 200 Hz - 2 kHz
+    bar_high: list[float] = field(default_factory=list)  # ... above 5 kHz
+    sections: list[dict] = field(default_factory=list)  # {"label", "start_bar", "end_bar"}; bar 0 = first downbeat
     version: int = ANALYSIS_VERSION
 
 
@@ -190,10 +196,17 @@ def _analyze_uncached(p: Path) -> TrackAnalysis:
     db = int(np.argmax(phases))
     ranked = sorted(phases)
     conf = ranked[-1] / (ranked[-2] + 1e-9)
-    bars = []
-    for bi in range((nb - db) // 4):
-        s = int((off + (db + 4 * bi) * period) * sr)
-        e_ = int((off + (db + 4 * bi + 4) * period) * sr)
-        bars.append(float(np.sqrt(np.mean(y[s:e_] ** 2))))
+    n_bars = (nb - db) // 4
+    edges = [int((off + (db + 4 * bi) * period) * sr) for bi in range(n_bars + 1)]
+    bands = {
+        "full": y,
+        "low": sosfilt(butter(4, 150, "low", fs=sr, output="sos"), y),
+        "mid": sosfilt(butter(4, [200, 2000], "band", fs=sr, output="sos"), y),
+        "high": sosfilt(butter(4, 5000, "high", fs=sr, output="sos"), y),
+    }
+    bar = {k: [round(float(np.sqrt(np.mean(v[a:b] ** 2))), 6) for a, b in zip(edges[:-1], edges[1:], strict=True)]
+           for k, v in bands.items()}
+    secs = [s.to_dict() for s in detect_sections(bar["low"], bar["mid"], bar["high"])]
     return TrackAnalysis(path=str(p), sample_rate=sr, duration_s=dur, bpm=float(bpm), offset_s=float(off),
-                         downbeat=db, downbeat_confidence=float(conf), bar_rms=bars)
+                         downbeat=db, downbeat_confidence=float(conf), bar_rms=bar["full"], bar_low=bar["low"],
+                         bar_mid=bar["mid"], bar_high=bar["high"], sections=secs)

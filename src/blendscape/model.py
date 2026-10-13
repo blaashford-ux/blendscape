@@ -41,6 +41,7 @@ class TrackEntry:
     downbeat: int
     duration_s: float
     confidence: float = 0.0  # downbeat confidence from analysis, informational
+    sections: list[dict] = field(default_factory=list)  # detected structure, informational (see analysis.py)
 
     @property
     def grid(self) -> BeatGrid:
@@ -60,6 +61,9 @@ class Transition:
     overlap_beats: int = 32
     style: str = "bass_swap"
     eq: EQCurves = field(default_factory=EQCurves)
+    score: float | None = None  # planner's score for this choice, informational
+    note: str = ""  # why the planner chose it, informational
+    alternatives: list[dict] = field(default_factory=list)  # runners-up: {out_beat, in_beat, score, note}
 
 
 @dataclass
