@@ -33,6 +33,16 @@ class EQCurves:
 
 
 @dataclass
+class LimiterSettings:
+    """Final-mix peak limiter (ceiling is the plan's ``ceiling_db``)."""
+
+    enabled: bool = True
+    true_peak: bool = True  # measure on a 4x oversampled signal so inter-sample peaks respect the ceiling
+    lookahead_ms: float = 3.0
+    release_ms: float = 120.0
+
+
+@dataclass
 class TrackEntry:
     id: str
     path: str
@@ -73,6 +83,7 @@ class MixPlan:
     sample_rate: int = 44100
     bit_depth: int = 24
     ceiling_db: float = -1.0
+    limiter: LimiterSettings = field(default_factory=LimiterSettings)
     version: int = PLAN_VERSION
 
     def track(self, track_id: str) -> TrackEntry:
@@ -105,6 +116,7 @@ class MixPlan:
                 sample_rate=d.get("sample_rate", 44100),
                 bit_depth=d.get("bit_depth", 24),
                 ceiling_db=d.get("ceiling_db", -1.0),
+                limiter=LimiterSettings(**d.get("limiter", {})),
             )
         except (KeyError, TypeError) as e:
             raise PlanError(f"malformed plan: {e}") from e
@@ -137,6 +149,10 @@ def validate(plan: MixPlan) -> list[str]:
         errs.append(f"bit_depth must be one of {BIT_DEPTHS}, got {plan.bit_depth}")
     if not plan.ceiling_db <= 0:
         errs.append("ceiling_db must be <= 0")
+    if not 0.5 <= plan.limiter.lookahead_ms <= 20:
+        errs.append("limiter.lookahead_ms must be 0.5..20")
+    if not 10 <= plan.limiter.release_ms <= 2000:
+        errs.append("limiter.release_ms must be 10..2000")
     if len(plan.tracks) < 1:
         errs.append("plan needs at least one track")
     ids = [t.id for t in plan.tracks]

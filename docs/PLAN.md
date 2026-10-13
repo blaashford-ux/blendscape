@@ -96,7 +96,7 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-Status: **0 spike, 1 core engine and CLI, 2 smart mix points done** (2 is on `feature/smart-mix-points`); 3-5 to do.
+Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter (a milestone 5 item) is on `feature/limiter`; 3-5 to do.
 
 0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
@@ -120,6 +120,15 @@ Status: **0 spike, 1 core engine and CLI, 2 smart mix points done** (2 is on `fe
 - Known limits: gradual fade-outs are labelled as outro late; mixes are chosen greedily transition by transition (no
   look-ahead beyond leaving the next track room to exit); a track with no clear structure falls back to "leave
   late, enter at the start"; the section labels assume club-style 4/4 arrangements.
+
+### Limiter notes
+
+- `src/blendscape/limiter.py`: offline look-ahead true-peak limiter (stereo-linked, 4x oversampled peak detection per
+  ITU-R BS.1770). Gain = sliding minimum of the required gain, smoothed over the same window (guarantees the ceiling,
+  gives a smooth attack), then an exponential release applied to the reduction (only ever lowers the gain).
+- The ceiling holds exactly at the 4x measurement. A 4x meter can under-read wideband noise: the 8x+ peak of white
+  noise sat 0.34 dB over, band-limited material 0.04 dB. For deliverables that matter, use `--ceiling-db -1` or lower.
+- Not done: loudness normalisation (the limiter does not raise level), dither when exporting 16-bit.
 
 ## Testing approach
 

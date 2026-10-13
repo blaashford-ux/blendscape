@@ -86,8 +86,7 @@ def test_track_boundaries_before_and_after_overlaps_are_untouched_audio(chain, t
     mix, report = render(plan)
     x, _ = sf.read(tracks["a"][0], dtype="float32", always_2d=True)
     n = int((report.transitions[0][0] - 1.0) * SR)
-    gain = 10 ** (report.gain_db / 20)
-    a_rms = np.sqrt(np.mean((x[:n] * gain) ** 2))
+    a_rms = np.sqrt(np.mean(x[:n] ** 2))
     m_rms = np.sqrt(np.mean(mix[:n] ** 2))
     assert m_rms == pytest.approx(a_rms, rel=0.03)
 
@@ -108,3 +107,33 @@ def test_plan_roundtrip_renders_identically(tracks, tmp_path):
     m2, _ = render(MixPlan.load(f))
     assert m1.shape == m2.shape
     np.testing.assert_allclose(m1, m2, atol=1e-6)
+
+
+def test_limiter_only_touches_peaks_not_the_whole_mix(tracks):
+    """The old behaviour scaled the entire mix to fit the ceiling. The summed mix peaks about +0.4 dBFS, so a -3 dB
+    ceiling needs ~3.4 dB of reduction at the peaks; that would have dragged the kick-less intro down by 3.4 dB
+    too. With a limiter the intro (whose few pad accents only just touch the ceiling) stays within ~0.7 dB."""
+    import soundfile as sf
+
+    plan = _plan(tracks, "ab", overlap=8)
+    plan.ceiling_db = -3.0
+    mix, report = render(plan)
+    assert report.max_reduction_db > 3.0 and 0 < report.limited_fraction < 0.95
+    assert report.peak_after_db <= -3.0 + 0.05
+    assert np.abs(mix).max() <= 10 ** (-3.0 / 20) + 1e-4
+    x, _ = sf.read(tracks["a"][0], dtype="float32", always_2d=True)
+    n = int(10 * SR)  # inside A's kick-less 8-bar intro (about 15 s)
+    ratio = np.sqrt(np.mean(mix[:n] ** 2)) / np.sqrt(np.mean(x[:n] ** 2))
+    assert ratio > 10 ** (-0.7 / 20)  # whole-mix scaling would give 0.68
+
+
+def test_this_mix_would_clip_without_the_limiter_and_does_not_with_it(tracks):
+    plan = _plan(tracks, "ab", overlap=8)
+    plan.limiter.enabled = False
+    mix, report = render(plan)
+    assert report.clipped and report.peak_before_db > 0  # two loud tracks summed in the overlap go over full scale
+    assert np.abs(mix).max() == 1.0  # clipped hard on the way out
+    plan.limiter.enabled = True
+    mix, report = render(plan)
+    assert not report.clipped and report.peak_after_db <= plan.ceiling_db + 0.05
+    assert report.max_reduction_db > 0.5
