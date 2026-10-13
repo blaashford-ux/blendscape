@@ -34,7 +34,7 @@ python blend.py out/mix.wav a.wav b.wav [c.wav ...] --beats 32 [--out-bar N --in
 | Continuity at overlap boundaries | no discontinuity (step 0.017 vs 0.6 typical) |
 | Bass doubling during the swap | low-band level never above 1.02x of the louder single track |
 | Chaining A->B->C | works; the tail of each blend keeps an exact grid (analytic) |
-| Render speed | roughly 30 s for a 2-track, 140 s mix (dominated by Rubber Band R3 + analysis) |
+| Render speed | about 40 s end to end (analysis + warp + render) for a 2-track, ~200 s mix; not profiled |
 
 ## Decisions
 
