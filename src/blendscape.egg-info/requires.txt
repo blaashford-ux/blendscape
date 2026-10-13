@@ -1,0 +1,8 @@
+numpy
+scipy
+soundfile
+librosa
+
+[dev]
+pytest
+ruff
