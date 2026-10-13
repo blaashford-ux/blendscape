@@ -96,10 +96,12 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-0. **Spike (de-risk).** Notebook/script: take two dance tracks, detect beats + downbeats,
+Status: **0 spike done; 1 core engine and CLI done** (`feature/core-engine`); 2-5 to do.
+
+0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
    sounds like a DJ mix on 3+ track pairs.
-1. **Core engine + CLI.** `analyze`, hand-written `mix_plan.json`, `render`. Unit tests on
+1. **Core engine + CLI. Done.** `analyze`, hand-written `mix_plan.json`, `render`. Unit tests on
    grid math and alignment (synthetic click tracks with known BPM/offset).
 2. **Planner + smart mix points.** Section detection, candidate scoring, defaults from the
    user's overlap setting.

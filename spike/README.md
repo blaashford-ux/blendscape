@@ -1,5 +1,7 @@
 # Milestone 0 spike
 
+> Superseded by the `blendscape` package in `src/` (milestone 1). Kept for reference; use `blendscape mix ...` instead.
+
 Goal: prove the blend (beat-match, phase-align, 3-band bass swap) on at least a few track pairs and decide
 the analyzer and stretcher.
 

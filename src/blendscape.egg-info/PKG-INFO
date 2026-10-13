@@ -1,0 +1,34 @@
+Metadata-Version: 2.4
+Name: blendscape
+Version: 0.1.0
+Summary: Automatic DJ-style blending of an ordered list of audio files.
+License-Expression: GPL-3.0-or-later
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE.txt
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: soundfile
+Requires-Dist: librosa
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Dynamic: license-file
+
+# Blendscape
+
+Project description goes here.
+
+## Branching
+
+- `main` – stable, release-ready code
+- `dev` – integration branch; feature branches are cut from and merged back into `dev`
+
+## Getting started
+
+Setup and usage instructions will be added here.
+
+## License
+
+Blendscape is free software, licensed under the
+[GNU General Public License v3.0 or later](LICENSE.txt) (`GPL-3.0-or-later`).
