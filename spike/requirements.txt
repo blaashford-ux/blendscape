@@ -1,0 +1,5 @@
+numpy
+scipy
+soundfile
+librosa
+pylibrb   # only used for its Option flag constants; stretching goes through system librubberband (ctypes)

@@ -23,3 +23,7 @@ __pycache__/
 
 # Logs
 *.log
+
+# Spike
+spike/fixtures/
+spike/out/
