@@ -3,7 +3,7 @@
 
 Usage: python blend.py out.wav a.wav b.wav [c.wav ...] [--beats 32]
 """
-import sys, json, argparse
+import sys, json, argparse, os
 import numpy as np, soundfile as sf
 from scipy.signal import butter, sosfilt
 from analyze import analyze, load
@@ -120,6 +120,7 @@ def main():
     peak = np.abs(cur).max()
     if peak > 0.98:
         cur = cur * (0.98 / peak)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     sf.write(args.out, cur.astype(np.float32), sr, subtype="PCM_16")
     print(f'wrote {args.out}: {len(cur)/sr:.1f}s, peak {peak:.3f}')
     return cur, infos, sr
