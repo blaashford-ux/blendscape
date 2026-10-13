@@ -13,6 +13,7 @@ frequency band.
 | Blend depth (v1) | Beatmatch + phase align + 3-band EQ swap + smart mix points |
 | Material | Electronic/dance, steady tempo |
 | Output | One mixed `.wav` (plus an editable mix plan) |
+| License | GPL-3.0-or-later (`LICENSE.txt`); allows use of GPL libraries such as Rubber Band |
 
 Deferred past v1: key matching / pitch shift, filter sweeps and effects, variable-tempo or
 live material, MP3/FLAC input.
@@ -119,9 +120,10 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 - Downbeat detection is the weakest link in the analysis. Needs manual override in the GUI
   and visible confidence.
-- Time-stretch quality and licensing (Rubber Band is GPL/commercial).
+- Time-stretch quality (Rubber Band is GPL; fine under our license).
 - Section detection heuristics may need tuning per sub-genre.
 - Input sample rates/bit depths differ: resample to a common project rate (e.g. 44.1 kHz),
   float32 internally; output bit depth as a setting.
 - Preview latency: render only the transition window +/- a few bars.
-- License of the project itself (affects the GPL decision above).
+- Licensing: the project is GPL-3.0-or-later. Every dependency must be GPL-compatible; check this when adding one.
+  New source files carry an SPDX header: `SPDX-License-Identifier: GPL-3.0-or-later`.
