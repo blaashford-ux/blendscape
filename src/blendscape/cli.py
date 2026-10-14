@@ -141,8 +141,15 @@ def cmd_serve(args) -> int:
         print(f"warning: serving on {args.host}: anyone who can reach this port can read files from this computer "
               f"through the API. Only do this on a network you trust.", file=sys.stderr)
     app = create_app(home=args.home)
-    print(f"Blendscape API on http://{args.host}:{args.port}  (docs at /docs, data in {app.state.store.home})",
-          file=sys.stderr)
+    url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}"
+    built = any(getattr(r, "name", "") == "web" for r in app.routes)
+    web = "web UI at /" if built else "web UI not built: see README"
+    print(f"Blendscape on {url}  ({web}; API docs at /docs; data in {app.state.store.home})", file=sys.stderr)
+    if args.open:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.0, webbrowser.open, args=[url]).start()
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
@@ -274,6 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1", help="address to listen on (default: this computer only)")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--home", help="where projects are stored (default: ~/.local/share/blendscape or $BLENDSCAPE_HOME)")
+    p.add_argument("--open", action="store_true", help="open the web UI in your browser")
     p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("plan", help="analyse files and write an editable mix_plan.json")

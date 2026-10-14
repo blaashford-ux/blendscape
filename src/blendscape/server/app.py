@@ -166,7 +166,8 @@ def project_view(store: ProjectStore, proj: dict) -> dict:
     desc = None
     if plan is not None:
         errs = validate(plan)
-        desc = describe_plan(plan) if not errs else None
+        names = {t["id"]: t["name"] for t in proj["tracks"]}  # what the user called them, not the stored file name
+        desc = describe_plan(plan, names) if not errs else None
     return {
         "id": proj["id"], "name": proj["name"], "created": proj["created"], "updated": proj["updated"],
         "settings": proj["settings"], "tracks": [track_view(store, proj, t) for t in proj["tracks"]],
@@ -409,10 +410,11 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
             raise Conflict(f"{t['path']} is missing")
         return FileResponse(t["path"], media_type=AUDIO_TYPES.get(Path(t["path"]).suffix.lower(), "audio/wav"))
 
-    @app.post("/api/projects/{pid}/tracks/{tid}/click", tags=["tracks"])
+    @app.api_route("/api/projects/{pid}/tracks/{tid}/click", methods=["GET", "POST"], tags=["tracks"])
     def click_clip(pid: str, tid: str, start: float | None = Query(None, ge=0),
                    seconds: float = Query(30, gt=0, le=120)):
-        """A short WAV with a metronome on the detected bar line, to check the downbeat by ear."""
+        """A short WAV with a metronome on the detected bar line, to check the downbeat by ear. GET so an audio
+        element can play it directly (POST is accepted too)."""
         proj = store.get(pid)
         t = track_of(proj, tid)
         a = store.load_analysis(pid, tid, store.file_key(t["path"]))

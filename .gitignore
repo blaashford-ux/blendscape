@@ -27,3 +27,10 @@ __pycache__/
 # Spike
 spike/fixtures/
 spike/out/
+
+# Web UI
+web/node_modules/
+web/dist/
+web/e2e/.run/
+web/test-results/
+web/playwright-report/

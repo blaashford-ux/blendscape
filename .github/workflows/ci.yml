@@ -22,3 +22,43 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: System packages (Rubber Band CLI, libsndfile)
+        run: sudo apt-get update && sudo apt-get install -y rubberband-cli libsndfile1
+      - run: pip install -e ".[dev]"
+      - run: npm ci && npx playwright install --with-deps chromium && npm run build
+        working-directory: web
+      - run: npx playwright test
+        working-directory: web
+        env:
+          PYTHON: python

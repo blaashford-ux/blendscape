@@ -95,23 +95,37 @@ If the clicks drift away from the kick, the tempo or beat grid is off, which is 
 `blendscape validate` checks the plan and prints the mix times. Analysis results are cached by file content in
 `~/.cache/blendscape` (override with `$BLENDSCAPE_CACHE`).
 
-### Web API
+### Web UI
 
 ```bash
 pip install -e ".[api]"
-blendscape serve                  # http://127.0.0.1:8765  (interactive reference at /docs)
+cd web && npm install && npm run build && cd ..      # needs Node 20+; builds web/dist once
+blendscape serve --open                              # http://127.0.0.1:8765
 ```
 
-A local HTTP API over everything above (projects, analysis, plan editing, previews of single transitions, final
-renders, live progress). The web UI will be built on it. Reference and a worked session: [docs/API.md](docs/API.md).
-It reads files from paths you give it, so it listens on this computer only unless you say otherwise.
+Open the page, name a mix, drop in your songs (or add them by file path), and it analyses them and lays out a plan:
+
+- **The mix**: every track on the output timeline with the overlaps shaded. Click an overlap to edit that transition.
+- **Transition editor**: both songs zoomed around the mix point, with their beat grid and sections (intro / body /
+  breakdown / outro). Move where the first leaves and the second enters by a bar or a phrase, set the overlap, choose
+  bass-swap or plain crossfade, fine-tune the frequency swap, try the planner's other choices, and **preview** just that
+  transition before rendering anything.
+- **Tracks**: drag to reorder; each shows how sure the bar line is, with buttons to shift it and a click-track to check
+  it by ear.
+- **Render the mix** when you're happy; the WAV is listed under "Rendered mixes" to play or download.
+
+Everything the UI does goes through the local HTTP API ([docs/API.md](docs/API.md), interactive reference at `/docs`);
+it listens on this computer only unless you say otherwise. For working on the UI itself: `cd web && npm run dev`
+(proxies to a running `blendscape serve`).
 
 ### Develop
 
 ```bash
 ruff check .
-pytest                              # ~2 min; the end-to-end renders are marked `slow`
-BLENDSCAPE_SKIP_SLOW=1 pytest       # quick run without the renders
+pytest                              # ~7 min; the end-to-end renders are marked `slow`
+BLENDSCAPE_SKIP_SLOW=1 pytest       # quicker run without the renders
+cd web && npm test                  # UI unit/component tests (a few seconds)
+cd web && npm run e2e               # real browser + real server (needs `npm run build` first; ~1 min)
 ```
 
 See [docs/PLAN.md](docs/PLAN.md) for the design and milestones.
