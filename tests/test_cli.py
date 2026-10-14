@@ -229,3 +229,39 @@ def test_no_cap_flag_zero_means_unlimited(tracks, tmp_path):
     plan = tmp_path / "plan.json"
     assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16",
                  "--max-cut-seconds", "0"]) == 0
+
+
+# ---------- serve ----------
+def test_serve_starts_uvicorn_on_localhost_by_default(tmp_path, monkeypatch, capsys):
+    import uvicorn
+
+    seen = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw, app=app))
+    assert main(["serve", "--port", "9123", "--home", str(tmp_path / "h")]) == 0
+    assert seen["host"] == "127.0.0.1" and seen["port"] == 9123
+    assert (tmp_path / "h" / "projects").is_dir()
+    assert "warning" not in capsys.readouterr().err
+
+
+def test_serve_warns_when_listening_beyond_this_computer(tmp_path, monkeypatch, capsys):
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    assert main(["serve", "--host", "0.0.0.0", "--home", str(tmp_path / "h")]) == 0
+    err = capsys.readouterr().err
+    assert "warning" in err and "read files from this computer" in err
+
+
+def test_serve_explains_missing_packages(monkeypatch, capsys):
+    import builtins
+
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name == "uvicorn":
+            raise ImportError("no uvicorn", name="uvicorn")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    assert main(["serve"]) == 2
+    assert 'pip install -e ".[api]"' in capsys.readouterr().err

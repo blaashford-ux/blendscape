@@ -137,3 +137,22 @@ def test_this_mix_would_clip_without_the_limiter_and_does_not_with_it(tracks):
     mix, report = render(plan)
     assert not report.clipped and report.peak_after_db <= plan.ceiling_db + 0.05
     assert report.max_reduction_db > 0.5
+
+
+def test_preview_covers_the_overlap_plus_the_requested_lead_and_tail(tracks):
+    from blendscape.render import render_preview
+
+    plan = _plan(tracks, "ab", overlap=16, mix_points="latest")
+    tr = plan.transitions[0]
+    audio, sr, rep = render_preview(plan, 0, lead_s=3.0, tail_s=5.0)
+    overlap_s = tr.overlap_beats * 60 / plan.tracks[0].bpm
+    assert sr == SR and audio.shape[1] == 2
+    assert len(audio) / sr == pytest.approx(3.0 + overlap_s + 5.0, abs=0.6)  # the glide makes it a little shorter
+    s, e = rep.transitions[0]
+    assert s == pytest.approx(3.0, abs=0.01) and e - s == pytest.approx(overlap_s, abs=0.7)
+    assert np.abs(audio).max() <= 10 ** (plan.ceiling_db / 20) + 1e-4
+    # before the overlap it is the outgoing track on its own, after it the incoming one on its own
+    assert np.sqrt(np.mean(audio[: int(2.0 * sr)] ** 2)) > 0.01
+    assert np.sqrt(np.mean(audio[-int(2.0 * sr):] ** 2)) > 0.01
+    with pytest.raises(ValueError):
+        render_preview(plan, 5)

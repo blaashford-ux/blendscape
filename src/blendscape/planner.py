@@ -224,17 +224,21 @@ def overlap_beats_for_seconds(seconds: float, bpm: float) -> int:
 def make_plan(analyses: list[TrackAnalysis], overlap_beats: int = 32, style: str = "bass_swap",
               phrase_bars: int = 8, sample_rate: int = 44100, bit_depth: int = 24,
               ceiling_db: float = -1.0, mix_points: str = "smart", overlap_seconds: float | None = None,
-              max_cut_s: float | None = DEFAULT_MAX_CUT_S) -> MixPlan:
+              max_cut_s: float | None = DEFAULT_MAX_CUT_S, track_ids: list[str] | None = None) -> MixPlan:
     """``mix_points``: ``"smart"`` scores candidates using the detected structure; ``"latest"`` leaves each track
     on its last phrase boundary that fits and enters the next at its first downbeat.
 
     ``overlap_seconds`` sets each overlap by time instead of beats (rounded to whole bars at the outgoing track's
-    tempo). ``max_cut_s`` caps how much of each outgoing track's music may go unplayed (``None`` or 0 = no cap)."""
+    tempo). ``max_cut_s`` caps how much of each outgoing track's music may go unplayed (``None`` or 0 = no cap).
+    ``track_ids`` supplies stable ids (one per analysis) instead of ones derived from file names and order."""
     max_cut_s = max_cut_s or None
+    if track_ids is not None and (len(track_ids) != len(analyses) or len(set(track_ids)) != len(track_ids)):
+        raise PlanError("track_ids must be unique and match the number of tracks")
     if mix_points not in ("smart", "latest"):
         raise ValueError("mix_points must be 'smart' or 'latest'")
     tracks = [
-        TrackEntry(id=_track_id(i, a.path), path=str(Path(a.path).resolve()), bpm=round(a.bpm, 4),
+        TrackEntry(id=track_ids[i] if track_ids else _track_id(i, a.path), path=str(Path(a.path).resolve()),
+                   bpm=round(a.bpm, 4),
                    offset_s=round(a.offset_s, 6), downbeat=a.downbeat, duration_s=round(a.duration_s, 4),
                    confidence=round(a.downbeat_confidence, 3), sections=list(a.sections),
                    active_end_s=round(a.active_end_s, 3))

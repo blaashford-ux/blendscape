@@ -128,6 +128,25 @@ def cmd_click(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    try:
+        import uvicorn
+
+        from .server.app import create_app
+    except ImportError as e:
+        print(f"error: the web server needs extra packages ({e.name}); install them with: pip install -e \".[api]\"",
+              file=sys.stderr)
+        return 2
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"warning: serving on {args.host}: anyone who can reach this port can read files from this computer "
+              f"through the API. Only do this on a network you trust.", file=sys.stderr)
+    app = create_app(home=args.home)
+    print(f"Blendscape API on http://{args.host}:{args.port}  (docs at /docs, data in {app.state.store.home})",
+          file=sys.stderr)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def cmd_plan(args) -> int:
     plan = _build_plan(args)
     plan.save(args.output)
@@ -250,6 +269,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="preview this grid beat as the bar line instead of the detected one")
     _add_analysis_opts(p)
     p.set_defaults(fn=cmd_click)
+
+    p = sub.add_parser("serve", help="start the local web API (and the web UI once it is built)")
+    p.add_argument("--host", default="127.0.0.1", help="address to listen on (default: this computer only)")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--home", help="where projects are stored (default: ~/.local/share/blendscape or $BLENDSCAPE_HOME)")
+    p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("plan", help="analyse files and write an editable mix_plan.json")
     _add_plan_opts(p)
