@@ -13,7 +13,8 @@ license-files = ["LICENSE.txt"]
 dependencies = ["numpy", "scipy", "soundfile", "librosa", "numba"]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+api = ["fastapi", "uvicorn[standard]", "python-multipart"]
+dev = ["pytest", "ruff", "httpx", "fastapi", "uvicorn[standard]", "python-multipart"]
 
 [project.scripts]
 blendscape = "blendscape.cli:main"
@@ -29,6 +30,9 @@ markers = ["slow: end-to-end renders (need the rubberband executable)"]
 line-length = 120
 src = ["src", "tests"]
 extend-exclude = ["spike"]  # throwaway milestone-0 prototype
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.File", "fastapi.Query"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

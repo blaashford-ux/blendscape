@@ -94,6 +94,59 @@ def render_parts(plan: MixPlan, progress: Progress | None = None) -> tuple[list[
     return parts, tl
 
 
+def render_preview(plan: MixPlan, index: int, lead_s: float = 8.0, tail_s: float = 8.0,
+                   progress: Progress | None = None) -> tuple[np.ndarray, int, RenderReport]:
+    """Render just transition ``index`` (0-based) with ``lead_s`` seconds of the outgoing track before the overlap and
+    ``tail_s`` seconds of the incoming track after it, through the same limiter as the full mix. The outgoing track
+    plays at its native tempo before the overlap, whatever came before it in the full plan.
+    Returns ``(audio, sample_rate, report)``."""
+    check(plan)
+    if not 0 <= index < len(plan.transitions):
+        raise ValueError(f"no transition {index}")
+    say = progress or (lambda _m: None)
+    sub = MixPlan(tracks=[plan.tracks[index], plan.tracks[index + 1]], transitions=[plan.transitions[index]],
+                sample_rate=plan.sample_rate, bit_depth=plan.bit_depth, ceiling_db=plan.ceiling_db,
+                limiter=plan.limiter)
+    tl = build_timeline(sub)
+    sr = plan.sample_rate
+    master = tl.transitions[0].master
+    w0 = max(0, int(master[0] - lead_s * sr))
+    w1 = int(master[-1] + tail_s * sr)
+    a_span, b_span = tl.spans
+    a_span.src_start = max(0.0, w0 - a_span.shift)  # a is the first track of the sub-plan: shift 0
+    b_span.src_end = w1 - b_span.shift
+    b_span.to_end_of_file = False
+    mix = np.zeros((w1 - w0, 2), np.float32)
+    for i, entry in enumerate(sub.tracks):
+        say(f"[{i + 1}/2] {entry.id}: loading and warping")
+        audio, _ = load_audio(entry.path, sr)
+        y, start = _render_track(sub, tl, i, audio)
+        del audio
+        lo, hi = max(start, w0), min(start + len(y), w1)
+        if hi > lo:
+            mix[lo - w0: hi - w0] += y[lo - start: hi - start]
+    report = RenderReport(duration_s=len(mix) / sr, transitions=[((master[0] - w0) / sr, (master[-1] - w0) / sr)])
+    mix = _finish(mix, sub, report, say)
+    return mix, sr, report
+
+
+def _finish(mix: np.ndarray, plan: MixPlan, report: RenderReport, say: Progress) -> np.ndarray:
+    """Limit (or clip) the summed mix and fill in the level fields of ``report``."""
+    sr, lim = plan.sample_rate, plan.limiter
+    if lim.enabled:
+        say("limiting")
+        mix, r = apply_limiter(mix, sr, plan.ceiling_db, lim.lookahead_ms, lim.release_ms, lim.true_peak)
+        report.peak_before_db, report.peak_after_db = r.peak_before_db, r.peak_after_db
+        report.max_reduction_db, report.limited_fraction = r.max_reduction_db, r.limited_fraction
+    else:
+        peak = float(np.abs(mix).max()) if len(mix) else 0.0
+        report.peak_before_db = report.peak_after_db = 20 * math.log10(max(peak, 1e-9))
+        if peak > 1.0:
+            report.clipped = True
+            mix = np.clip(mix, -1.0, 1.0)
+    return mix
+
+
 def render(plan: MixPlan, progress: Progress | None = None) -> tuple[np.ndarray, RenderReport]:
     parts, tl = render_parts(plan, progress)
     sr = plan.sample_rate
@@ -101,19 +154,8 @@ def render(plan: MixPlan, progress: Progress | None = None) -> tuple[np.ndarray,
     mix = np.zeros((n_out, 2), np.float32)
     for y, start in parts:
         mix[start: start + len(y)] += y
-    lim = plan.limiter
     say = progress or (lambda _m: None)
     report = RenderReport(duration_s=n_out / sr,
                           transitions=[tl.overlap_seconds(i) for i in range(len(tl.transitions))])
-    if lim.enabled:
-        say("limiting")
-        mix, r = apply_limiter(mix, sr, plan.ceiling_db, lim.lookahead_ms, lim.release_ms, lim.true_peak)
-        report.peak_before_db, report.peak_after_db = r.peak_before_db, r.peak_after_db
-        report.max_reduction_db, report.limited_fraction = r.max_reduction_db, r.limited_fraction
-    else:
-        peak = float(np.abs(mix).max())
-        report.peak_before_db = report.peak_after_db = 20 * math.log10(max(peak, 1e-9))
-        if peak > 1.0:
-            report.clipped = True
-            mix = np.clip(mix, -1.0, 1.0)
+    mix = _finish(mix, plan, report, say)
     return mix, report

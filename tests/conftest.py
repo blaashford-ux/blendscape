@@ -49,3 +49,52 @@ def rich_set(tmp_path_factory):
     d = tmp_path_factory.mktemp("rich")
     styles = synth_rich.STYLES + synth_rich.HARD_STYLES
     return synth_rich.make_set(str(d), per_style=2, seed=3, n_bars=32, styles=styles)
+
+
+# ---------- API fixtures ----------
+@pytest.fixture(scope="session")
+def api_home(tmp_path_factory):
+    """One data home for the whole session, so analyses (cached by content) are computed once."""
+    return tmp_path_factory.mktemp("api-home")
+
+
+@pytest.fixture
+def client(api_home):
+    from fastapi.testclient import TestClient
+
+    from blendscape.server.app import create_app
+
+    with TestClient(create_app(home=api_home, workers=2)) as c:
+        yield c
+
+
+def wait_job(client, job_id, timeout=240):
+    import time
+
+    t = time.time()
+    while True:
+        j = client.get(f"/api/jobs/{job_id}").json()
+        if j["state"] in ("done", "error", "cancelled"):
+            return j
+        assert time.time() - t < timeout, f"job stuck: {j}"
+        time.sleep(0.1)
+
+
+@pytest.fixture
+def project(client, tracks):
+    """A fresh project holding the three synthetic tracks (by path), not yet analysed."""
+    p = client.post("/api/projects", json={"name": "test mix"}).json()
+    for name in "abc":
+        r = client.post(f"/api/projects/{p['id']}/tracks", json={"path": tracks[name][0]})
+        assert r.status_code == 201, r.text
+    return client.get(f"/api/projects/{p['id']}").json()
+
+
+@pytest.fixture
+def planned(client, project):
+    """The same project analysed and planned with a short overlap (so the 24-bar test tracks have room)."""
+    pid = project["id"]
+    assert client.patch(f"/api/projects/{pid}/settings", json={"overlap_beats": 16}).status_code == 200
+    j = client.post(f"/api/projects/{pid}/analyze").json()
+    assert wait_job(client, j["id"])["state"] == "done"
+    return client.get(f"/api/projects/{pid}").json()

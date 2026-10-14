@@ -96,7 +96,7 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter, the downbeat model and the unplayed-tail limit (milestone 5 items) are done; 3-5 to do.
+Status: **0 spike, 1 core engine and CLI, 2 smart mix points, 3 API done**; the limiter, the downbeat model and the unplayed-tail limit (milestone 5 items) are done; 4-5 to do.
 
 0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
@@ -105,7 +105,7 @@ Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter
    grid math and alignment (synthetic click tracks with known BPM/offset).
 2. **Planner + smart mix points. Done.** Section detection, candidate scoring, defaults from the
    user's overlap setting.
-3. **API.** Projects, jobs, plan CRUD, preview/final render.
+3. **API. Done.** Projects, jobs, plan CRUD, preview/final render (`src/blendscape/server/`, `docs/API.md`).
 4. **GUI.** Track list, waveform/beat grid, transition editor, preview, export.
 5. **Hardening.** Low-confidence handling, big-BPM-gap handling, loudness normalisation,
    performance (long tracks, caching), packaging.

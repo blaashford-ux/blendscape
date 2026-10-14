@@ -95,6 +95,17 @@ If the clicks drift away from the kick, the tempo or beat grid is off, which is 
 `blendscape validate` checks the plan and prints the mix times. Analysis results are cached by file content in
 `~/.cache/blendscape` (override with `$BLENDSCAPE_CACHE`).
 
+### Web API
+
+```bash
+pip install -e ".[api]"
+blendscape serve                  # http://127.0.0.1:8765  (interactive reference at /docs)
+```
+
+A local HTTP API over everything above (projects, analysis, plan editing, previews of single transitions, final
+renders, live progress). The web UI will be built on it. Reference and a worked session: [docs/API.md](docs/API.md).
+It reads files from paths you give it, so it listens on this computer only unless you say otherwise.
+
 ### Develop
 
 ```bash
