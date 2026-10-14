@@ -96,7 +96,7 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-Status: **0 spike, 1 core engine and CLI, 2 smart mix points, 3 API done**; the limiter, the downbeat model and the unplayed-tail limit (milestone 5 items) are done; 4-5 to do.
+Status: **0 spike, 1 core engine and CLI, 2 smart mix points, 3 API, 4 GUI done**; the limiter, the downbeat model and the unplayed-tail limit (milestone 5 items) are done; the rest of 5 to do.
 
 0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
@@ -106,7 +106,7 @@ Status: **0 spike, 1 core engine and CLI, 2 smart mix points, 3 API done**; the 
 2. **Planner + smart mix points. Done.** Section detection, candidate scoring, defaults from the
    user's overlap setting.
 3. **API. Done.** Projects, jobs, plan CRUD, preview/final render (`src/blendscape/server/`, `docs/API.md`).
-4. **GUI.** Track list, waveform/beat grid, transition editor, preview, export.
+4. **GUI. Done.** React + TypeScript (`web/`): track list with reordering and bar-line check, mix timeline, transition editor with waveforms, beat grid and sections, EQ timing, alternatives, preview, render/download. 123 unit/component tests and 6 real-browser tests.
 5. **Hardening.** Low-confidence handling, big-BPM-gap handling, loudness normalisation,
    performance (long tracks, caching), packaging.
 

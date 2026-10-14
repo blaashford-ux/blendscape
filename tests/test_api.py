@@ -16,10 +16,25 @@ def test_health_reports_the_stretch_backend(client):
     assert d["stretch_backend"] in ("cli", "ctypes", None)
 
 
-def test_root_says_what_it_is(client):
-    r = client.get("/")
-    assert r.status_code == 200
-    assert "docs" in r.text.lower()
+def test_root_explains_itself_when_the_web_ui_is_not_built(api_home, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from blendscape.server.app import create_app
+
+    with TestClient(create_app(home=api_home, web_dir=tmp_path / "no-build")) as c:
+        d = c.get("/").json()
+    assert d["docs"] == "/docs" and d["web_ui"] == "not built yet"
+
+
+def test_root_serves_the_built_web_ui_next_to_the_api(api_home, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from blendscape.server.app import create_app
+
+    (tmp_path / "index.html").write_text("<!doctype html><title>Blendscape UI</title>")
+    with TestClient(create_app(home=api_home, web_dir=tmp_path)) as c:
+        assert "Blendscape UI" in c.get("/").text
+        assert c.get("/api/health").json()["ok"] is True  # the API is not shadowed by the UI
 
 
 def test_cors_allows_the_local_dev_server_and_nothing_else(client):
@@ -116,6 +131,21 @@ def test_upload_keeps_a_copy_and_sanitises_the_name(client, tracks, api_home):
     # removing the track removes the copy
     assert client.delete(f"/api/projects/{pid}/tracks/{t['id']}").status_code == 204
     assert not list(audio_dir.iterdir())
+
+
+def test_uploaded_tracks_keep_the_name_you_gave_them_everywhere(client, tracks):
+    pid = client.post("/api/projects", json={}).json()["id"]
+    client.patch(f"/api/projects/{pid}/settings", json={"overlap_beats": 16})
+    for n, label in (("a", "first song.wav"), ("b", "second.wav")):
+        data = open(tracks[n][0], "rb").read()
+        r = client.post(f"/api/projects/{pid}/tracks/upload", files={"file": (label, data, "audio/wav")})
+        assert r.status_code == 201
+    assert wait_job(client, client.post(f"/api/projects/{pid}/analyze").json()["id"])["state"] == "done"
+    p = client.get(f"/api/projects/{pid}").json()
+    assert [t["name"] for t in p["tracks"]] == ["first song.wav", "second.wav"]
+    # (not the stored "u_1a2b3c4d-first song.wav")
+    assert [t["name"] for t in p["plan"]["tracks"]] == ["first song.wav", "second.wav"]
+    assert all("u_" not in w for t in p["plan"]["transitions"] for w in t["warnings"])
 
 
 def test_upload_of_something_that_is_not_audio_leaves_nothing_behind(client, api_home):
@@ -366,18 +396,18 @@ def test_original_audio_supports_range_requests(client, planned):
 
 def test_click_clip_is_a_wav_of_the_requested_length(client, planned):
     pid, t = planned["id"], planned["tracks"][0]
-    r = client.get  # noqa: F841
-    r = client.post(f"/api/projects/{pid}/tracks/{t['id']}/click", params={"seconds": 6})
+    r = client.get(f"/api/projects/{pid}/tracks/{t['id']}/click", params={"seconds": 6})  # what an <audio> element does
     assert r.status_code == 200 and r.headers["content-type"] == "audio/wav"
     import io
 
     data, sr = sf.read(io.BytesIO(r.content))
     assert sr == SR and 5.9 < len(data) / sr < 6.1
+    assert client.post(f"/api/projects/{pid}/tracks/{t['id']}/click", params={"seconds": 3}).status_code == 200
 
 
 def test_click_needs_an_analysis(client, project):
     t = project["tracks"][0]
-    assert client.post(f"/api/projects/{project['id']}/tracks/{t['id']}/click").status_code == 409
+    assert client.get(f"/api/projects/{project['id']}/tracks/{t['id']}/click").status_code == 409
 
 
 # ---------- jobs ----------

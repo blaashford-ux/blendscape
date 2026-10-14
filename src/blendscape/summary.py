@@ -11,15 +11,20 @@ from .timeline import build_timeline
 LOW_CONFIDENCE = 0.5  # below this the bar-line choice is close to a guess
 
 
-def describe_plan(plan: MixPlan) -> dict:
+def describe_plan(plan: MixPlan, names: dict[str, str] | None = None) -> dict:
     """Tracks, transitions (with where they land on the output clock, what is skipped, warnings) and the total
-    length. Assumes the plan is valid."""
+    length. Assumes the plan is valid. ``names`` maps track ids to display names (default: the file name)."""
     tl = build_timeline(plan)
     sr = plan.sample_rate
+    names = names or {}
+
+    def label(t) -> str:
+        return names.get(t.id) or Path(t.path).name
+
     tracks = []
     for t in plan.tracks:
         tracks.append({
-            "id": t.id, "name": Path(t.path).name, "bpm": t.bpm, "downbeat": t.downbeat, "confidence": t.confidence,
+            "id": t.id, "name": label(t), "bpm": t.bpm, "downbeat": t.downbeat, "confidence": t.confidence,
             "duration_s": t.duration_s, "end_s": t.end_s, "sections": t.sections, "offset_s": t.offset_s,
         })
     transitions = []
@@ -32,8 +37,7 @@ def describe_plan(plan: MixPlan) -> dict:
             warnings.append(f"Tempo gap {gap:.0%} is over {MAX_STRETCH:.0%}: expect audible stretching.")
         for t in (a, b):
             if t.confidence and t.confidence < LOW_CONFIDENCE:
-                name = Path(t.path).name
-                warnings.append(f"Bar line of {name} is a guess ({t.confidence:.0%} sure): check it by ear.")
+                warnings.append(f"Bar line of {label(t)} is a guess ({t.confidence:.0%} sure): check it by ear.")
         cut = unplayed_s(a, tr.out_beat, tr.overlap_beats)
         transitions.append({
             "index": i, "from": a.id, "to": b.id, "style": tr.style, "overlap_beats": tr.overlap_beats,

@@ -243,6 +243,26 @@ def test_serve_starts_uvicorn_on_localhost_by_default(tmp_path, monkeypatch, cap
     assert "warning" not in capsys.readouterr().err
 
 
+def test_serve_can_open_the_browser_and_says_whether_the_ui_is_built(tmp_path, monkeypatch, capsys):
+    import webbrowser
+
+    import uvicorn
+
+    opened = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setenv("BLENDSCAPE_WEB", str(tmp_path / "no-such-build"))
+    assert main(["serve", "--port", "9124", "--home", str(tmp_path / "h"), "--open"]) == 0
+    assert "web UI not built" in capsys.readouterr().err
+    import time
+
+    for _ in range(40):
+        if opened:
+            break
+        time.sleep(0.05)
+    assert opened == ["http://127.0.0.1:9124"]
+
+
 def test_serve_warns_when_listening_beyond_this_computer(tmp_path, monkeypatch, capsys):
     import uvicorn
 

@@ -48,7 +48,7 @@ POST   /api/projects/{p}/render              {"name": "friday"}                 
 | `GET /api/projects/{p}/tracks/{t}/analysis` | full analysis (tempo, grid, per-bar loudness, sections, downbeat posterior) |
 | `GET /api/projects/{p}/tracks/{t}/waveform?points=1500` | `{min[], max[], duration_s}` peaks for drawing a waveform |
 | `GET /api/projects/{p}/tracks/{t}/audio` | the original file, with HTTP Range support for seeking |
-| `POST /api/projects/{p}/tracks/{t}/click?start=&seconds=` | WAV with a metronome on the detected bar line, to check it by ear |
+| `GET /api/projects/{p}/tracks/{t}/click?start=&seconds=` | WAV with a metronome on the detected bar line, to check it by ear (POST works too) |
 | `POST /api/projects/{p}/analyze` | job: analyse any track that needs it, then plan (`{"replan": false}` to skip, `{"force": true}` to redo) |
 | `POST /api/projects/{p}/plan` | plan again now (needs every track analysed) |
 | `GET /api/projects/{p}/plan` | the raw plan, staleness, warnings, and the described timeline |
