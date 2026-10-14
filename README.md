@@ -50,6 +50,26 @@ the level down at the peaks (smooth 3 ms attack, 120 ms release) and leaves ever
 (default -1), `--release-ms`, `--sample-peak` (skip the inter-sample check) and `--no-limiter` adjust it; the same
 settings live in the plan's `limiter` block. Peak levels before and after are printed when rendering.
 
+### Checking the bar lines by ear
+
+A blend only sounds right if both tracks' bar lines are right, and that is the one thing detection can get wrong
+without any sign in the numbers. `analyze` prints how sure it is (`downbeat beat 2 (87% sure)`), and below about 50%
+it tells you to check:
+
+```bash
+blendscape click one.wav -o check.wav          # 30 s with a metronome: a HIGH click on the detected bar line
+```
+
+Play `check.wav` and count along with the music. The high click should land on the "one" of each bar (where chords
+change, a crash or a drop hits). The command prints which `--downbeat` value to use if it lands on the 2, 3 or 4. Then
+force it, for any file in a `plan`/`mix` run:
+
+```bash
+blendscape mix one.wav two.wav -o mix.wav --downbeat two=3     # NAME is the file name, stem or full path
+```
+
+If the clicks drift away from the kick, the tempo or beat grid is off, which is a different problem (tell me).
+
 ### The plan file
 
 `plan.json` is plain JSON and is the thing to edit. Beat numbers refer to each *source* track's own beat grid:

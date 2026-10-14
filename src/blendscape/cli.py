@@ -9,13 +9,16 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import __version__
-from .analysis import AnalysisError, TrackAnalysis, analyze
-from .audio import AudioError, write_audio
+from .analysis import AnalysisError, TrackAnalysis, analyze, with_downbeat
+from .audio import AudioError, load_audio, write_audio
+from .check import click_check, explain_fix
 from .model import MixPlan, PlanError, validate
 from .planner import MAX_STRETCH, make_plan, tempo_gap
 from .render import render
 from .stretch import StretchError, available, backend
 from .timeline import build_timeline
+
+LOW_CONFIDENCE = 0.5  # below this the bar-line choice is close to a guess (~half were wrong in testing); check by ear
 
 
 def _clock(sec: float) -> str:
@@ -26,11 +29,31 @@ def _say(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+def _parse_downbeats(items: list[str] | None) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in items or []:
+        name, sep, val = item.rpartition("=")
+        if not sep or not name or val not in ("0", "1", "2", "3"):
+            raise AnalysisError(f"--downbeat expects NAME=N with N in 0..3 (got '{item}')")
+        out[name] = int(val)
+    return out
+
+
 def _analyze_all(paths: list[str], args) -> list[TrackAnalysis]:
+    overrides = _parse_downbeats(getattr(args, "downbeat", None))
     out = []
     for p in paths:
         _say(f"analysing {p}")
         out.append(analyze(p, cache_dir=args.cache_dir, use_cache=not args.no_cache))
+    for name, db in overrides.items():
+        hits = [i for i, p in enumerate(paths) if name in (p, Path(p).name, Path(p).stem)]
+        if not hits:
+            raise AnalysisError(f"--downbeat {name}={db}: no input file matches '{name}'")
+        if len({paths[i] for i in hits}) > 1:
+            raise AnalysisError(f"--downbeat {name}={db}: '{name}' matches more than one file; give the full path")
+        for i in hits:
+            out[i] = with_downbeat(out[i], db)
+            _say(f"{paths[i]}: downbeat set to beat {db} by hand")
     return out
 
 
@@ -39,7 +62,9 @@ def _print_plan_summary(plan: MixPlan, explain: bool = False) -> None:
     print(f"{len(plan.tracks)} tracks, {len(plan.transitions)} transitions, {plan.sample_rate} Hz, "
           f"{plan.bit_depth}-bit, ceiling {plan.ceiling_db} dBFS")
     for i, t in enumerate(plan.tracks):
-        warn = "  (low downbeat confidence: check the bar lines)" if t.confidence and t.confidence < 1.15 else ""
+        warn = ""
+        if t.confidence and t.confidence < LOW_CONFIDENCE:
+            warn = f"  (downbeat unsure, {t.confidence:.0%}: check with `blendscape click`, fix with --downbeat)"
         print(f"  {i + 1}. {t.id}: {t.bpm:.2f} BPM, first downbeat beat {t.downbeat}, {_clock(t.duration_s)}{warn}")
     for i, tr in enumerate(plan.transitions):
         a, b = plan.tracks[i], plan.tracks[i + 1]
@@ -66,8 +91,11 @@ def cmd_analyze(args) -> int:
         print(json.dumps([asdict(r) for r in results], indent=2))
     else:
         for r in results:
+            note = "set by hand" if r.downbeat_manual else f"{r.downbeat_confidence:.0%} sure"
             print(f"{r.path}: {r.bpm:.2f} BPM, grid offset {r.offset_s * 1000:.1f} ms, downbeat beat {r.downbeat} "
-                  f"(confidence {r.downbeat_confidence:.2f}), {_clock(r.duration_s)}")
+                  f"({note}), {_clock(r.duration_s)}")
+            if not r.downbeat_manual and r.downbeat_confidence < LOW_CONFIDENCE:
+                print(f"    unsure about the bar line; check it by ear: blendscape click \"{r.path}\" -o check.wav")
             if r.sections:
                 print("    sections (bars): " + ", ".join(
                     f"{s['label']} {s['start_bar']}-{s['end_bar']}" for s in r.sections))
@@ -79,6 +107,20 @@ def _build_plan(args) -> MixPlan:
     return make_plan(analyses, overlap_beats=args.overlap_beats, style=args.style, phrase_bars=args.phrase_bars,
                      sample_rate=args.sample_rate, bit_depth=args.bit_depth, ceiling_db=args.ceiling_db,
                      mix_points=args.mix_points)
+
+
+def cmd_click(args) -> int:
+    a = _analyze_all([args.file], args)[0]
+    if args.downbeat_n is not None:
+        a = with_downbeat(a, args.downbeat_n)
+    audio, _ = load_audio(args.file)
+    mix, start = click_check(a, audio, args.start, args.seconds)
+    write_audio(args.output, mix, a.sample_rate, 16)
+    print(f"wrote {args.output}: {args.seconds:.0f} s from {_clock(start)}, {a.bpm:.2f} BPM, "
+          f"bar line on grid beat {a.downbeat}" + (" (set by hand)" if a.downbeat_manual else
+                                                   f" ({a.downbeat_confidence:.0%} sure)"))
+    print("\n".join(explain_fix(a.downbeat)))
+    return 0
 
 
 def cmd_plan(args) -> int:
@@ -149,6 +191,11 @@ def _add_analysis_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-cache", action="store_true", help="ignore and do not write the analysis cache")
 
 
+def _add_downbeat_opt(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--downbeat", action="append", metavar="FILE=N",
+                   help="force which grid beat (0-3) starts a bar for FILE (name, stem or path); repeatable")
+
+
 def _add_limiter_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-limiter", action="store_true", help="turn the limiter off (the mix may clip)")
     p.add_argument("--release-ms", type=float, help="limiter release time in ms (default 120)")
@@ -168,6 +215,7 @@ def _add_plan_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--bit-depth", type=int, choices=(16, 24, 32), default=24, help="output bit depth (32 = float)")
     p.add_argument("--ceiling-db", type=float, default=-1.0, help="limiter ceiling in dB, true peak (default -1)")
     _add_limiter_opts(p)
+    _add_downbeat_opt(p)
     _add_analysis_opts(p)
 
 
@@ -181,6 +229,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     _add_analysis_opts(p)
     p.set_defaults(fn=cmd_analyze)
+
+    p = sub.add_parser("click", help="write a short clip with a metronome on the detected bar line, to check by ear")
+    p.add_argument("file")
+    p.add_argument("-o", "--output", default="check.wav")
+    p.add_argument("--start", type=float, help="start time in seconds (default: the first loud section)")
+    p.add_argument("--seconds", type=float, default=30.0)
+    p.add_argument("--downbeat", dest="downbeat_n", type=int, choices=(0, 1, 2, 3),
+                   help="preview this grid beat as the bar line instead of the detected one")
+    _add_analysis_opts(p)
+    p.set_defaults(fn=cmd_click)
 
     p = sub.add_parser("plan", help="analyse files and write an editable mix_plan.json")
     _add_plan_opts(p)

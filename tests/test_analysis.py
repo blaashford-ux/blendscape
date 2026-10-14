@@ -68,3 +68,30 @@ def test_song_structure_is_detected_on_the_synthetic_tracks(tracks):
     assert len(r.bar_low) == len(r.bar_mid) == len(r.bar_high) == len(r.bar_rms)
     # kick and bass live in the low band: silent in the intro, strong in the body
     assert max(r.bar_low[:8]) < 0.1 * max(r.bar_low[8:16])
+
+
+def test_full_pipeline_finds_a_bar_line_the_old_accent_rule_could_not(rich_set):
+    """bass_root has its only bar-line cue in the sub-bass (a long root note on beat 1), which the old mid-band
+    accent rule never heard."""
+    t = next(x for x in rich_set if x.style == "bass_root")
+    r = analyze(t.path)
+    assert r.downbeat == t.downbeat
+    assert r.downbeat_confidence > 0.5 and sum(r.downbeat_probs) == pytest.approx(1.0)
+    assert not r.downbeat_manual
+
+
+def test_with_downbeat_recomputes_bars_and_marks_it_manual(tracks):
+    from blendscape.analysis import with_downbeat
+
+    r = analyze(tracks["a"][0])
+    forced = with_downbeat(r, (r.downbeat + 1) % 4)
+    assert forced.downbeat == (r.downbeat + 1) % 4
+    assert forced.downbeat_manual and forced.downbeat_confidence == 1.0
+    assert forced.downbeat_probs[forced.downbeat] == 1.0
+    assert forced.bpm == r.bpm and forced.offset_s == r.offset_s  # only the bar line moved
+    assert forced.bar_low != r.bar_low  # the bars were re-cut one beat later
+    assert forced.sections and forced.sections[0]["start_bar"] == 0
+    same = with_downbeat(r, r.downbeat)
+    assert same.downbeat_manual and same.downbeat == r.downbeat
+    with pytest.raises(AnalysisError, match="0, 1, 2 or 3"):
+        with_downbeat(r, 4)

@@ -152,3 +152,62 @@ def test_mix_end_to_end(tracks, tmp_path, capsys):
     out2 = tmp_path / "again.wav"
     assert main(["render", str(keep), "-o", str(out2), "--bit-depth", "24"]) == 0
     assert sf.info(out2).subtype == "PCM_24"
+
+
+# ---------- downbeat: confidence, override, click check ----------
+def _flat_track(tmp_path):
+    from synth_rich import make_track
+
+    p = tmp_path / "flat.wav"
+    make_track(p, "flat", 126.0, 0.2, 2, seed=5, n_bars=32)
+    return str(p)
+
+
+def test_analyze_reports_downbeat_confidence_and_suggests_the_click_check_when_unsure(tmp_path, capsys):
+    p = _flat_track(tmp_path)
+    assert main(["analyze", p]) == 0
+    out = capsys.readouterr().out
+    assert "% sure" in out and "blendscape click" in out  # a track with no bar-line cue must say so
+
+
+def test_downbeat_override_changes_the_plan(tmp_path, capsys):
+    p = _flat_track(tmp_path)
+    q = tmp_path / "other.wav"
+    import shutil
+
+    shutil.copy(p, q)
+    plan = tmp_path / "plan.json"
+    assert main(["plan", p, str(q), "-o", str(plan), "--overlap-beats", "16",
+                 "--downbeat", "flat=1", "--downbeat", f"{q}=3"]) == 0
+    d = json.loads(plan.read_text())
+    assert [t["downbeat"] for t in d["tracks"]] == [1, 3]
+    assert d["transitions"][0]["in_beat"] == 3  # the incoming track enters on its (forced) bar line
+    assert "downbeat set to beat 3 by hand" in capsys.readouterr().err
+    assert d["tracks"][0]["confidence"] == 1.0
+
+
+def test_downbeat_override_errors_are_clear(tmp_path, capsys):
+    p = _flat_track(tmp_path)
+    plan = tmp_path / "plan.json"
+    assert main(["plan", p, p, "-o", str(plan), "--downbeat", "nonesuch=1"]) == 1
+    assert "no input file matches" in capsys.readouterr().err
+    assert main(["plan", p, p, "-o", str(plan), "--downbeat", "flat=7"]) == 1
+    assert "expects NAME=N" in capsys.readouterr().err
+
+
+def test_click_writes_a_checkable_clip_and_explains_how_to_read_it(tmp_path, capsys):
+    p = _flat_track(tmp_path)
+    out = tmp_path / "check.wav"
+    assert main(["click", p, "-o", str(out), "--seconds", "6", "--downbeat", "2"]) == 0
+    text = capsys.readouterr().out
+    assert "bar line on grid beat 2 (set by hand)" in text
+    assert "HIGH click" in text and "--downbeat" in text
+    info = sf.info(out)
+    assert info.channels == 2 and 5.5 < info.duration < 6.5
+
+
+def test_low_confidence_is_called_out_in_the_plan_summary(tmp_path, capsys):
+    p = _flat_track(tmp_path)
+    plan = tmp_path / "plan.json"
+    assert main(["plan", p, p, "-o", str(plan), "--overlap-beats", "16"]) == 0
+    assert "downbeat unsure" in capsys.readouterr().out

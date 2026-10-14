@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import librosa
@@ -13,9 +13,10 @@ import numpy as np
 from scipy.signal import butter, sosfilt
 
 from .audio import load_audio
+from .downbeat import estimate_downbeat
 from .sections import detect_sections
 
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 HOP = 64
 NFFT = 1024
 MIN_DURATION_S = 10.0
@@ -33,12 +34,14 @@ class TrackAnalysis:
     bpm: float
     offset_s: float  # time of grid beat 0
     downbeat: int  # beat index (0..3) that starts a bar
-    downbeat_confidence: float  # best / second-best phase score; ~1.0 means "could be any beat"
+    downbeat_confidence: float  # posterior of the chosen beat: 0.25 = no idea, 1.0 = certain (1.0 if set by hand)
     bar_rms: list[float] = field(default_factory=list)  # loudness per bar from the first downbeat
     bar_low: list[float] = field(default_factory=list)  # per-bar RMS of the low band (<150 Hz: kick and bass)
     bar_mid: list[float] = field(default_factory=list)  # ... 200 Hz - 2 kHz
     bar_high: list[float] = field(default_factory=list)  # ... above 5 kHz
     sections: list[dict] = field(default_factory=list)  # {"label", "start_bar", "end_bar"}; bar 0 = first downbeat
+    downbeat_probs: list[float] = field(default_factory=list)  # posterior for each of the four candidate beats
+    downbeat_manual: bool = False  # True if the downbeat was set by hand rather than detected
     version: int = ANALYSIS_VERSION
 
 
@@ -185,17 +188,18 @@ def _analyze_uncached(p: Path) -> TrackAnalysis:
     off += lags[int(np.argmax(sc))] / sr
     bpm = 60 / period
     off = off % period
-    # downbeat: mid-band flux at beats folded into four phases
+    bpm = 60 / period
+    off = off % period
+    est = estimate_downbeat(y, sr, off, period)
+    bar_low, bar_mid, bar_high, bar_full, secs = _bar_profile(y, sr, off, period, est.phase)
+    return TrackAnalysis(path=str(p), sample_rate=sr, duration_s=dur, bpm=float(bpm), offset_s=float(off),
+                         downbeat=est.phase, downbeat_confidence=est.confidence, bar_rms=bar_full, bar_low=bar_low,
+                         bar_mid=bar_mid, bar_high=bar_high, sections=secs, downbeat_probs=est.probs)
+
+
+def _bar_profile(y: np.ndarray, sr: int, off: float, period: float, db: int):
+    """Per-bar loudness (full / low / mid / high) and detected sections, bars counted from the first downbeat."""
     nb = int((len(y) / sr - off) / period)
-    bt = off + period * np.arange(nb)
-    zm = z(mid)
-    win = int(0.02 * fps)
-    mf = np.array([zm[max(0, int(t_ * fps) - win): int(t_ * fps) + win].max()
-                   if int(t_ * fps) + win < len(zm) else 0.0 for t_ in bt])
-    phases = [float(mf[q::4].mean()) for q in range(4)]
-    db = int(np.argmax(phases))
-    ranked = sorted(phases)
-    conf = ranked[-1] / (ranked[-2] + 1e-9)
     n_bars = (nb - db) // 4
     edges = [int((off + (db + 4 * bi) * period) * sr) for bi in range(n_bars + 1)]
     bands = {
@@ -207,6 +211,18 @@ def _analyze_uncached(p: Path) -> TrackAnalysis:
     bar = {k: [round(float(np.sqrt(np.mean(v[a:b] ** 2))), 6) for a, b in zip(edges[:-1], edges[1:], strict=True)]
            for k, v in bands.items()}
     secs = [s.to_dict() for s in detect_sections(bar["low"], bar["mid"], bar["high"])]
-    return TrackAnalysis(path=str(p), sample_rate=sr, duration_s=dur, bpm=float(bpm), offset_s=float(off),
-                         downbeat=db, downbeat_confidence=float(conf), bar_rms=bar["full"], bar_low=bar["low"],
-                         bar_mid=bar["mid"], bar_high=bar["high"], sections=secs)
+    return bar["low"], bar["mid"], bar["high"], bar["full"], secs
+
+
+def with_downbeat(a: TrackAnalysis, downbeat: int) -> TrackAnalysis:
+    """Return ``a`` with the bar line forced onto grid beat ``downbeat`` (0..3): the per-bar profile and sections
+    are recomputed to match. Use when detection picked the wrong beat."""
+    if not 0 <= downbeat < 4:
+        raise AnalysisError("downbeat must be 0, 1, 2 or 3 (which grid beat starts a bar)")
+    if downbeat == a.downbeat and not a.downbeat_manual:
+        return replace(a, downbeat_manual=True, downbeat_confidence=1.0)
+    x, _ = load_audio(a.path)
+    low, mid, high, full, secs = _bar_profile(x.mean(1), a.sample_rate, a.offset_s, 60 / a.bpm, downbeat)
+    probs = [1.0 if i == downbeat else 0.0 for i in range(4)]
+    return replace(a, downbeat=downbeat, downbeat_confidence=1.0, downbeat_manual=True, downbeat_probs=probs,
+                   bar_rms=full, bar_low=low, bar_mid=mid, bar_high=high, sections=secs)
