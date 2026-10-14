@@ -43,7 +43,12 @@ that fits.
 Each transition Each transition beat-matches the two tracks (the tempo glides from the
 outgoing track's BPM to the incoming one's over the overlap), lines up their downbeats, and swaps the bass, mids and
 highs at different moments. Options: `--overlap-beats` (default 32 = 8 bars), `--style bass_swap|crossfade`,
-`--phrase-bars` (default 8), `--sample-rate`, `--bit-depth 16|24|32`, `--ceiling-db`.
+`--phrase-bars` (default 8), `--sample-rate`, `--bit-depth 16|24|32`.
+
+The mix goes through a look-ahead true-peak limiter, so two loud tracks summed in an overlap never clip. It only turns
+the level down at the peaks (smooth 3 ms attack, 120 ms release) and leaves everything else alone. `--ceiling-db`
+(default -1), `--release-ms`, `--sample-peak` (skip the inter-sample check) and `--no-limiter` adjust it; the same
+settings live in the plan's `limiter` block. Peak levels before and after are printed when rendering.
 
 ### The plan file
 

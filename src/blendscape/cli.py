@@ -110,11 +110,24 @@ def _do_render(plan: MixPlan, output: str, args) -> int:
         plan.bit_depth = args.bit_depth
     if getattr(args, "ceiling_db", None) is not None:
         plan.ceiling_db = args.ceiling_db
+    if getattr(args, "no_limiter", False):
+        plan.limiter.enabled = False
+    if getattr(args, "release_ms", None) is not None:
+        plan.limiter.release_ms = args.release_ms
+    if getattr(args, "sample_peak", False):
+        plan.limiter.true_peak = False
     _say(f"stretch backend: {backend()}")
     mix, report = render(plan, progress=_say)
     write_audio(output, mix, plan.sample_rate, plan.bit_depth)
-    _say(f"wrote {output}: {_clock(report.duration_s)}, peak before limiting {report.peak_before:.3f}"
-         + (f", reduced by {-report.gain_db:.1f} dB" if report.gain_db < -0.05 else ""))
+    if report.clipped:
+        _say("warning: the mix goes over 0 dBFS and was clipped; enable the limiter or lower the ceiling")
+    if plan.limiter.enabled:
+        lim = (f"peak {report.peak_before_db:+.1f} -> {report.peak_after_db:+.1f} dB"
+               + (f", limiter reduced by up to {report.max_reduction_db:.1f} dB over "
+                  f"{report.limited_fraction:.1%} of the mix" if report.max_reduction_db > 0.05 else ", limiter idle"))
+    else:
+        lim = f"peak {report.peak_before_db:+.1f} dB, limiter off"
+    _say(f"wrote {output}: {_clock(report.duration_s)}, {lim}")
     return 0
 
 
@@ -136,6 +149,12 @@ def _add_analysis_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-cache", action="store_true", help="ignore and do not write the analysis cache")
 
 
+def _add_limiter_opts(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--no-limiter", action="store_true", help="turn the limiter off (the mix may clip)")
+    p.add_argument("--release-ms", type=float, help="limiter release time in ms (default 120)")
+    p.add_argument("--sample-peak", action="store_true", help="limit sample peaks only, not inter-sample peaks")
+
+
 def _add_plan_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("files", nargs="+", metavar="FILE", help="audio files in mix order")
     p.add_argument("--overlap-beats", type=int, default=32, help="overlap length in beats (default 32 = 8 bars)")
@@ -147,7 +166,8 @@ def _add_plan_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--explain", action="store_true", help="also list the runner-up mix points")
     p.add_argument("--sample-rate", type=int, default=44100)
     p.add_argument("--bit-depth", type=int, choices=(16, 24, 32), default=24, help="output bit depth (32 = float)")
-    p.add_argument("--ceiling-db", type=float, default=-1.0, help="peak ceiling in dBFS (default -1)")
+    p.add_argument("--ceiling-db", type=float, default=-1.0, help="limiter ceiling in dB, true peak (default -1)")
+    _add_limiter_opts(p)
     _add_analysis_opts(p)
 
 
@@ -175,7 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("plan")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--bit-depth", type=int, choices=(16, 24, 32), help="override the plan's bit depth")
-    p.add_argument("--ceiling-db", type=float, help="override the plan's peak ceiling")
+    p.add_argument("--ceiling-db", type=float, help="override the plan's limiter ceiling")
+    _add_limiter_opts(p)
     p.set_defaults(fn=cmd_render)
 
     p = sub.add_parser("mix", help="plan and render in one step")

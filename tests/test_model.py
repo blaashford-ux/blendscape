@@ -75,6 +75,8 @@ def test_wrong_version_and_bad_json(tmp_path):
         (lambda p: setattr(p, "bit_depth", 8), "bit_depth"),
         (lambda p: setattr(p, "ceiling_db", 3.0), "ceiling_db"),
         (lambda p: setattr(p.transitions[0].eq, "hi_in", (0.5, 0.2)), "hi_in"),
+        (lambda p: setattr(p.limiter, "lookahead_ms", 100.0), "lookahead_ms"),
+        (lambda p: setattr(p.limiter, "release_ms", 1.0), "release_ms"),
         (lambda p: p.transitions.pop(), "expected 2 transitions"),
         (lambda p: setattr(p.transitions[0], "to_track", "t2"), "in order"),
     ],
@@ -87,3 +89,18 @@ def test_validation_catches(mutate, message):
     assert any(message in e for e in errs), errs
     with pytest.raises(PlanError):
         check(plan)
+
+
+def test_limiter_settings_roundtrip_and_defaults(tmp_path):
+    plan = _plan(2)
+    assert plan.limiter.enabled and plan.limiter.true_peak
+    plan.limiter.release_ms = 250.0
+    plan.limiter.enabled = False
+    f = tmp_path / "p.json"
+    plan.save(f)
+    again = MixPlan.load(f)
+    assert again.limiter.release_ms == 250.0 and again.limiter.enabled is False
+    # plans written before the limiter existed still load, with defaults
+    d = plan.to_dict()
+    del d["limiter"]
+    assert MixPlan.from_dict(d).limiter.enabled is True

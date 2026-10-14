@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE.txt"]
-dependencies = ["numpy", "scipy", "soundfile", "librosa"]
+dependencies = ["numpy", "scipy", "soundfile", "librosa", "numba"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]

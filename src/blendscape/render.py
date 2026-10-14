@@ -10,6 +10,7 @@ import numpy as np
 
 from .audio import load_audio
 from .bands import Gains, bass_swap_gains, crossfade_gains, split3
+from .limiter import apply_limiter
 from .model import MixPlan, check
 from .stretch import warp
 from .timeline import Timeline, build_timeline
@@ -21,8 +22,11 @@ PAD_S = 0.5  # seconds of unity-speed context around each warped region
 @dataclass
 class RenderReport:
     duration_s: float = 0.0
-    peak_before: float = 0.0
-    gain_db: float = 0.0  # level change applied by the ceiling (<= 0)
+    peak_before_db: float = 0.0  # peak of the summed mix before limiting, dBFS
+    peak_after_db: float = 0.0
+    max_reduction_db: float = 0.0  # deepest limiter gain reduction (>= 0)
+    limited_fraction: float = 0.0  # share of the mix with more than 0.1 dB of reduction
+    clipped: bool = False  # limiter off and the mix went over 0 dBFS (it will be clipped on export)
     transitions: list[tuple[float, float]] = field(default_factory=list)  # (start_s, end_s) of each overlap
 
 
@@ -97,13 +101,19 @@ def render(plan: MixPlan, progress: Progress | None = None) -> tuple[np.ndarray,
     mix = np.zeros((n_out, 2), np.float32)
     for y, start in parts:
         mix[start: start + len(y)] += y
-    peak = float(np.abs(mix).max())
-    ceiling = 10 ** (plan.ceiling_db / 20)
-    gain = min(1.0, ceiling / peak) if peak > 0 else 1.0
-    if gain < 1.0:
-        mix *= np.float32(gain)
-    report = RenderReport(
-        duration_s=n_out / sr, peak_before=peak, gain_db=20 * math.log10(gain) if gain > 0 else 0.0,
-        transitions=[tl.overlap_seconds(i) for i in range(len(tl.transitions))],
-    )
+    lim = plan.limiter
+    say = progress or (lambda _m: None)
+    report = RenderReport(duration_s=n_out / sr,
+                          transitions=[tl.overlap_seconds(i) for i in range(len(tl.transitions))])
+    if lim.enabled:
+        say("limiting")
+        mix, r = apply_limiter(mix, sr, plan.ceiling_db, lim.lookahead_ms, lim.release_ms, lim.true_peak)
+        report.peak_before_db, report.peak_after_db = r.peak_before_db, r.peak_after_db
+        report.max_reduction_db, report.limited_fraction = r.max_reduction_db, r.limited_fraction
+    else:
+        peak = float(np.abs(mix).max())
+        report.peak_before_db = report.peak_after_db = 20 * math.log10(max(peak, 1e-9))
+        if peak > 1.0:
+            report.clipped = True
+            mix = np.clip(mix, -1.0, 1.0)
     return mix, report

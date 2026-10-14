@@ -62,6 +62,31 @@ def test_big_tempo_gap_is_called_out(tracks, tmp_path, capsys):
     assert sf.info(slow).duration > 10
 
 
+def test_limiter_flags_reach_the_plan(tracks, tmp_path, monkeypatch):
+    from blendscape import cli
+
+    seen = {}
+
+    def fake_render(plan, progress=None):
+        import numpy as np
+
+        from blendscape.render import RenderReport
+
+        seen["lim"] = plan.limiter
+        seen["ceil"] = plan.ceiling_db
+        return np.zeros((100, 2), np.float32), RenderReport(duration_s=0.002)
+
+    monkeypatch.setattr(cli, "render", fake_render)
+    monkeypatch.setattr(cli, "available", lambda: True)
+    monkeypatch.setattr(cli, "backend", lambda: "cli")
+    plan = tmp_path / "plan.json"
+    main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16"])
+    assert main(["render", str(plan), "-o", str(tmp_path / "o.wav"), "--no-limiter", "--release-ms", "300",
+                 "--sample-peak", "--ceiling-db", "-2"]) == 0
+    assert seen["lim"].enabled is False and seen["lim"].release_ms == 300 and seen["lim"].true_peak is False
+    assert seen["ceil"] == -2
+
+
 def test_plan_then_validate(tracks, tmp_path, capsys):
     plan = tmp_path / "plan.json"
     assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16"]) == 0
