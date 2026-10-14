@@ -39,3 +39,13 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "slow" in item.keywords:
                 item.add_marker(skip)
+
+
+@pytest.fixture(scope="session")
+def rich_set(tmp_path_factory):
+    """Two tracks of every synthetic style (incl. the hard ones) with a known bar line: list of synth_rich.Truth."""
+    import synth_rich
+
+    d = tmp_path_factory.mktemp("rich")
+    styles = synth_rich.STYLES + synth_rich.HARD_STYLES
+    return synth_rich.make_set(str(d), per_style=2, seed=3, n_bars=32, styles=styles)

@@ -96,7 +96,7 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter (a milestone 5 item) is on `feature/limiter`; 3-5 to do.
+Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter and the downbeat model (milestone 5 items) are done; 3-5 to do.
 
 0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
@@ -129,6 +129,20 @@ Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter
 - The ceiling holds exactly at the 4x measurement. A 4x meter can under-read wideband noise: the 8x+ peak of white
   noise sat 0.34 dB over, band-limited material 0.04 dB. For deliverables that matter, use `--ceiling-db -1` or lower.
 - Not done: loudness normalisation (the limiter does not raise level), dither when exporting 16-bit.
+
+### Downbeat model notes
+
+- `src/blendscape/downbeat.py` replaces the single mid-band accent rule with six independent cues (kick accent, mid
+  accent, backbeat claps, chord change, bass-root change, impacts, arrangement boundaries), fused into a posterior
+  over the four candidate beats. Confidence is that posterior (0.25 = no idea).
+- `benchmarks/downbeat_bench.py` measures it on `tests/synth_rich.py`, a generator of club-style tracks with the bar
+  line hidden in different places (and two hard styles: no cue at all; accents pointing at the wrong beat). With the
+  true beat grid supplied, on seeds not used for tuning: old rule 48-52%, new 88-92%; every cued style 100% on the
+  last seed; confident predictions (>=50%) were all right; tracks with no cue got 0.25-0.43 confidence.
+- **These are synthetic tracks written by the same person who wrote the detector.** Treat the percentages as "the
+  cues work as designed", not as a measured accuracy on music. The weights and temperature were set by hand, not
+  fitted. Real music is the test: `blendscape click` and `--downbeat` exist so a wrong guess costs ten seconds.
+- Not covered: non-4/4 material, tracks with tempo changes, genres with no kick or bass (the cues assume club music).
 
 ## Testing approach
 
