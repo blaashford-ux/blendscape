@@ -95,3 +95,30 @@ def test_with_downbeat_recomputes_bars_and_marks_it_manual(tracks):
     assert same.downbeat_manual and same.downbeat == r.downbeat
     with pytest.raises(AnalysisError, match="0, 1, 2 or 3"):
         with_downbeat(r, 4)
+
+
+def test_active_end_ignores_trailing_silence_and_very_quiet_fades():
+    from blendscape.analysis import active_end
+
+    sr = 44100
+    rng = np.random.default_rng(0)
+    loud = (rng.standard_normal(sr * 20) * 0.3).astype(np.float32)
+    assert active_end(np.concatenate([loud, np.zeros(sr * 10, np.float32)]), sr) == pytest.approx(20.0, abs=0.1)
+    # a tail 60 dB down is below the 45 dB floor and does not count
+    quiet = (rng.standard_normal(sr * 10) * 0.0003).astype(np.float32)
+    assert active_end(np.concatenate([loud, quiet]), sr) == pytest.approx(20.0, abs=0.1)
+    # a tail 30 dB down is music (a ring-out) and does count
+    ring = (rng.standard_normal(sr * 10) * 0.01).astype(np.float32)
+    assert active_end(np.concatenate([loud, ring]), sr) == pytest.approx(30.0, abs=0.1)
+    assert active_end(np.zeros(sr * 5, np.float32), sr) == pytest.approx(5.0, abs=0.05)  # nothing to trim against
+
+
+def test_analysis_records_where_the_music_ends(tracks):
+    import soundfile as sf
+
+    r = analyze(tracks["a"][0])
+    assert 0 < r.active_end_s <= r.duration_s + 1e-6
+    assert r.active_end_s > r.duration_s - 3.0  # the synthetic tracks end with only ~2 s of room noise
+    quiet_end = tracks["a"][0]
+    x, sr = sf.read(quiet_end, dtype="float32", always_2d=True)
+    assert r.duration_s == pytest.approx(len(x) / sr)

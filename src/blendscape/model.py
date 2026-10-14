@@ -52,6 +52,12 @@ class TrackEntry:
     duration_s: float
     confidence: float = 0.0  # downbeat confidence from analysis, informational
     sections: list[dict] = field(default_factory=list)  # detected structure, informational (see analysis.py)
+    active_end_s: float = 0.0  # where audible content ends; 0 = unknown, use duration_s
+
+    @property
+    def end_s(self) -> float:
+        """End of the music in this file (trailing silence excluded)."""
+        return self.active_end_s if self.active_end_s > 0 else self.duration_s
 
     @property
     def grid(self) -> BeatGrid:
