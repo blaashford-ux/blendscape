@@ -16,7 +16,7 @@ from .audio import load_audio
 from .downbeat import estimate_downbeat
 from .sections import detect_sections
 
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 HOP = 64
 NFFT = 1024
 MIN_DURATION_S = 10.0
@@ -42,6 +42,7 @@ class TrackAnalysis:
     sections: list[dict] = field(default_factory=list)  # {"label", "start_bar", "end_bar"}; bar 0 = first downbeat
     downbeat_probs: list[float] = field(default_factory=list)  # posterior for each of the four candidate beats
     downbeat_manual: bool = False  # True if the downbeat was set by hand rather than detected
+    active_end_s: float = 0.0  # where audible content ends (trailing silence / very quiet fade trimmed); 0 = unknown
     version: int = ANALYSIS_VERSION
 
 
@@ -84,6 +85,19 @@ def analyze(path: str | Path, cache_dir: str | Path | None = None, use_cache: bo
         except OSError:
             pass
     return result
+
+
+def active_end(y: np.ndarray, sr: int, floor_db: float = 45.0) -> float:
+    """Time of the last frame within ``floor_db`` of the track's typical loud level (so a silent or near-silent tail
+    does not count as music)."""
+    hop = 1024
+    n = len(y) // hop
+    if n < 2:
+        return len(y) / sr
+    rms = np.sqrt((y[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
+    db = 20 * np.log10(rms + 1e-9)
+    live = np.flatnonzero(db > np.percentile(db, 95) - floor_db)
+    return float(min(len(y) / sr, (live[-1] + 1) * hop / sr)) if len(live) else len(y) / sr
 
 
 def _band_flux(S: np.ndarray, sr: int, lo: float, hi: float) -> np.ndarray:
@@ -194,7 +208,8 @@ def _analyze_uncached(p: Path) -> TrackAnalysis:
     bar_low, bar_mid, bar_high, bar_full, secs = _bar_profile(y, sr, off, period, est.phase)
     return TrackAnalysis(path=str(p), sample_rate=sr, duration_s=dur, bpm=float(bpm), offset_s=float(off),
                          downbeat=est.phase, downbeat_confidence=est.confidence, bar_rms=bar_full, bar_low=bar_low,
-                         bar_mid=bar_mid, bar_high=bar_high, sections=secs, downbeat_probs=est.probs)
+                         bar_mid=bar_mid, bar_high=bar_high, sections=secs, downbeat_probs=est.probs,
+                         active_end_s=round(active_end(y, sr), 3))
 
 
 def _bar_profile(y: np.ndarray, sr: int, off: float, period: float, db: int):

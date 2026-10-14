@@ -96,7 +96,7 @@ wav files ──> analyze ──> plan ──> render ──> mix.wav
 
 ## Milestones
 
-Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter and the downbeat model (milestone 5 items) are done; 3-5 to do.
+Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter, the downbeat model and the unplayed-tail limit (milestone 5 items) are done; 3-5 to do.
 
 0. **Spike (de-risk). Done** (`spike/`, superseded by `src/blendscape`). Notebook/script: take two dance tracks, detect beats + downbeats,
    stretch, align, 3-band swap, listen. Decide analyzer and stretcher. Exit: a blend that
@@ -143,6 +143,18 @@ Status: **0 spike, 1 core engine and CLI, 2 smart mix points done**; the limiter
   cues work as designed", not as a measured accuracy on music. The weights and temperature were set by hand, not
   fitted. Real music is the test: `blendscape click` and `--downbeat` exist so a wrong guess costs ten seconds.
 - Not covered: non-4/4 material, tracks with tempo changes, genres with no kick or bass (the cues assume club music).
+
+### Unplayed-tail limit (found on real music)
+
+- First feedback on non-electronic material (metal with vocals): the first track lost 30+ s of its ending. The
+  "leave at the start of the outro" bonus rewarded the outro's start however long it was, and nothing penalised the
+  audio after the overlap. Reproduced with a 24-bar quiet ending at 150 BPM (27 s skipped), fixed with a `tail` score
+  and a hard `max_cut_s` (default 10 s; finer phrase grids as the fallback), measured against the end of the audible
+  music (`active_end_s`, trailing silence trimmed).
+- `--overlap-seconds` sets the overlap by time (whole bars).
+- Still club-centric: the section detector assumes club arrangements; for songs with verses/choruses the structure
+  scoring is mostly noise, and the tail limit is what keeps it sane. A vocal-aware mode (e.g. a quick mid-band swap
+  instead of long overlaps, or detecting vocals and avoiding vocal-on-vocal overlaps) is not done.
 
 ## Testing approach
 

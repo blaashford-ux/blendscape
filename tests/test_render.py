@@ -115,7 +115,7 @@ def test_limiter_only_touches_peaks_not_the_whole_mix(tracks):
     too. With a limiter the intro (whose few pad accents only just touch the ceiling) stays within ~0.7 dB."""
     import soundfile as sf
 
-    plan = _plan(tracks, "ab", overlap=8)
+    plan = _plan(tracks, "ab", overlap=8, mix_points="latest")  # pins the overlap to a loud spot
     plan.ceiling_db = -3.0
     mix, report = render(plan)
     assert report.max_reduction_db > 3.0 and 0 < report.limited_fraction < 0.95
@@ -128,7 +128,7 @@ def test_limiter_only_touches_peaks_not_the_whole_mix(tracks):
 
 
 def test_this_mix_would_clip_without_the_limiter_and_does_not_with_it(tracks):
-    plan = _plan(tracks, "ab", overlap=8)
+    plan = _plan(tracks, "ab", overlap=8, mix_points="latest")  # pins the overlap to a loud spot
     plan.limiter.enabled = False
     mix, report = render(plan)
     assert report.clipped and report.peak_before_db > 0  # two loud tracks summed in the overlap go over full scale

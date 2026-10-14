@@ -9,7 +9,11 @@ inside both tracks, and the outgoing track has finished entering. Soft preferenc
 * in    - the incoming track enters through its intro, and its drop lands as the overlap ends
 * clash - little bass in both tracks at the same bars
 * util  - play most of the outgoing track (leave in its last third), and don't skip the incoming track's start
-"""
+* tail  - little of the outgoing track left unplayed after the overlap
+
+``max_cut_s`` makes the last one a hard limit: the overlap must end within that many seconds of the end of the outgoing
+track's music. If the phrase grid is too coarse to manage that, shorter phrases (4, 2, then 1 bar) are tried. Without
+it a long quiet ending that merely *looks* like an outro gets everything after the overlap thrown away."""
 from __future__ import annotations
 
 import math
@@ -23,7 +27,8 @@ from .grid import BEATS_PER_BAR
 from .model import EQCurves, MixPlan, PlanError, TrackEntry, Transition, check
 from .sections import Section, is_drop
 
-WEIGHTS = {"out": 0.25, "in": 0.30, "clash": 0.15, "util_a": 0.25, "util_b": 0.05}
+WEIGHTS = {"out": 0.25, "in": 0.30, "clash": 0.15, "util_a": 0.25, "util_b": 0.05, "tail": 0.20}
+DEFAULT_MAX_CUT_S = 10.0  # at most this much of the outgoing track's music is left unplayed after the overlap
 PLAYED_MIN, PLAYED_FULL = 0.35, 0.70  # utilisation: 0 if A leaves before 35% of its length, full from 70%
 MAX_STRETCH = 0.08  # tempo change beyond +-8% starts to sound processed
 N_ALTERNATIVES = 3
@@ -126,14 +131,45 @@ def _combine(parts: dict[str, float]) -> float:
     return sum(WEIGHTS[k] * parts[k] for k in WEIGHTS) / sum(WEIGHTS.values())
 
 
+def unplayed_s(a: TrackEntry, out_beat: int, overlap_beats: int) -> float:
+    """Seconds of the outgoing track's music that come after the overlap and are therefore not played."""
+    return a.end_s - a.grid.beat_time(out_beat + overlap_beats)
+
+
+def _phrase_ladder(phrase_bars: int) -> list[int]:
+    """Phrase lengths to try, longest first: 8, 4, 2, 1 bars (never longer than asked for)."""
+    ladder = [phrase_bars]
+    while ladder[-1] > 1:
+        ladder.append(max(1, ladder[-1] // 2))
+    return ladder
+
+
 def candidates(a: TrackEntry, b: TrackEntry, pa: Profile, pb: Profile, overlap_beats: int, free_from: int,
-               phrase_bars: int, last_track: bool) -> list[Candidate]:
-    """All phrase-aligned (out, in) pairs that satisfy the hard constraints, best first."""
+               phrase_bars: int, last_track: bool, max_cut_s: float | None = None) -> list[Candidate]:
+    """All phrase-aligned (out, in) pairs that satisfy the hard constraints, best first.
+
+    With ``max_cut_s`` set, the outgoing point must leave at most that much music unplayed; the phrase grid is made
+    finer (see :func:`_phrase_ladder`) until some point qualifies. If none does, the points that cut least are used
+    and the note says so."""
     nb_bars = math.ceil(overlap_beats / BEATS_PER_BAR)
-    step = phrase_bars * BEATS_PER_BAR
     last_a = a.n_beats - 1 - overlap_beats
     last_b = b.n_beats - 1 - overlap_beats
-    outs = [k for k in range(a.downbeat, a.n_beats, step) if free_from <= k <= last_a]
+    outs: list[int] = []
+    grid_note = ""
+    for pb_bars in _phrase_ladder(phrase_bars):
+        step = pb_bars * BEATS_PER_BAR
+        every = [k for k in range(a.downbeat, a.n_beats, step) if free_from <= k <= last_a]
+        outs = [k for k in every if max_cut_s is None or unplayed_s(a, k, overlap_beats) <= max_cut_s]
+        if outs:
+            grid_note = "" if pb_bars == phrase_bars else f" (on a {pb_bars}-bar grid to limit the cut)"
+            break
+    if not outs and max_cut_s is not None:  # nothing qualifies: take the points that cut least
+        every = [k for k in range(a.downbeat, a.n_beats, BEATS_PER_BAR) if free_from <= k <= last_a]
+        if every:
+            least = min(unplayed_s(a, k, overlap_beats) for k in every)
+            outs = [k for k in every if unplayed_s(a, k, overlap_beats) <= least + 1e-9]
+            grid_note = f" (could not keep the cut under {max_cut_s:.0f} s)"
+    step = phrase_bars * BEATS_PER_BAR
     # an incoming point must leave room for B's own next overlap unless B is the last track
     ins = [k for k in range(b.downbeat, b.n_beats, step) if k <= (last_b if last_track else last_b - overlap_beats)]
     out: list[Candidate] = []
@@ -149,8 +185,9 @@ def candidates(a: TrackEntry, b: TrackEntry, pa: Profile, pb: Profile, overlap_b
                 "clash": score_clash(pa, pb, oa, ib, nb_bars),
                 "util_a": float(np.clip((oa / max(1, pa.n_bars) - PLAYED_MIN) / (PLAYED_FULL - PLAYED_MIN), 0.0, 1.0)),
                 "util_b": 1.0 - ib / max(1, pb.n_bars),
+                "tail": 1.0 - float(np.clip(unplayed_s(a, ko, overlap_beats) / max(max_cut_s or 30.0, 1.0), 0.0, 1.0)),
             }
-            out.append(Candidate(ko, ki, _combine(parts), parts, f"A {no}; B {ni}"))
+            out.append(Candidate(ko, ki, _combine(parts), parts, f"A {no}; B {ni}{grid_note}"))
     out.sort(key=lambda c: (-round(c.score, 6), -c.out_beat, c.in_beat))
     return out
 
@@ -178,17 +215,29 @@ def _track_id(i: int, path: str) -> str:
     return f"t{i + 1}-{Path(path).stem}"
 
 
+def overlap_beats_for_seconds(seconds: float, bpm: float) -> int:
+    """Whole bars (a multiple of 4 beats, at least one bar) closest to ``seconds`` at ``bpm``."""
+    bars = max(1, round(seconds * bpm / 60.0 / BEATS_PER_BAR))
+    return bars * BEATS_PER_BAR
+
+
 def make_plan(analyses: list[TrackAnalysis], overlap_beats: int = 32, style: str = "bass_swap",
               phrase_bars: int = 8, sample_rate: int = 44100, bit_depth: int = 24,
-              ceiling_db: float = -1.0, mix_points: str = "smart") -> MixPlan:
+              ceiling_db: float = -1.0, mix_points: str = "smart", overlap_seconds: float | None = None,
+              max_cut_s: float | None = DEFAULT_MAX_CUT_S) -> MixPlan:
     """``mix_points``: ``"smart"`` scores candidates using the detected structure; ``"latest"`` leaves each track
-    on its last phrase boundary that fits and enters the next at its first downbeat."""
+    on its last phrase boundary that fits and enters the next at its first downbeat.
+
+    ``overlap_seconds`` sets each overlap by time instead of beats (rounded to whole bars at the outgoing track's
+    tempo). ``max_cut_s`` caps how much of each outgoing track's music may go unplayed (``None`` or 0 = no cap)."""
+    max_cut_s = max_cut_s or None
     if mix_points not in ("smart", "latest"):
         raise ValueError("mix_points must be 'smart' or 'latest'")
     tracks = [
         TrackEntry(id=_track_id(i, a.path), path=str(Path(a.path).resolve()), bpm=round(a.bpm, 4),
                    offset_s=round(a.offset_s, 6), downbeat=a.downbeat, duration_s=round(a.duration_s, 4),
-                   confidence=round(a.downbeat_confidence, 3), sections=list(a.sections))
+                   confidence=round(a.downbeat_confidence, 3), sections=list(a.sections),
+                   active_end_s=round(a.active_end_s, 3))
         for i, a in enumerate(analyses)
     ]
     profiles = [Profile.from_analysis(a, max(0, (t.n_beats - t.downbeat) // BEATS_PER_BAR))
@@ -197,15 +246,16 @@ def make_plan(analyses: list[TrackAnalysis], overlap_beats: int = 32, style: str
     free_from = 0  # first beat of the outgoing track that is clear of its own entrance
     for i in range(len(tracks) - 1):
         a, b = tracks[i], tracks[i + 1]
+        n_beats = overlap_beats_for_seconds(overlap_seconds, a.bpm) if overlap_seconds else overlap_beats
         ranked: list[Candidate] = []
         if mix_points == "smart":
-            ranked = candidates(a, b, profiles[i], profiles[i + 1], overlap_beats, free_from, phrase_bars,
-                                last_track=(i + 1 == len(tracks) - 1))
-        best = ranked[0] if ranked else _latest_phrase_pick(a, b, overlap_beats, free_from, phrase_bars)
+            ranked = candidates(a, b, profiles[i], profiles[i + 1], n_beats, free_from, phrase_bars,
+                                last_track=(i + 1 == len(tracks) - 1), max_cut_s=max_cut_s)
+        best = ranked[0] if ranked else _latest_phrase_pick(a, b, n_beats, free_from, phrase_bars)
         transitions.append(Transition(
-            a.id, b.id, best.out_beat, best.in_beat, overlap_beats, style, EQCurves(),
+            a.id, b.id, best.out_beat, best.in_beat, n_beats, style, EQCurves(),
             score=round(best.score, 3) if ranked else None, note=best.note,
             alternatives=[c.to_dict() for c in ranked[1:1 + N_ALTERNATIVES]],
         ))
-        free_from = best.in_beat + overlap_beats
+        free_from = best.in_beat + n_beats
     return check(MixPlan(tracks, transitions, sample_rate, bit_depth, ceiling_db))

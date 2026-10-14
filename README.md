@@ -40,6 +40,16 @@ the incoming track's intro with its drop landing as the overlap ends, and little
 `--explain` lists the runner-up choices; `--mix-points latest` turns the scoring off and just leaves on the last phrase
 that fits.
 
+**How much of a song is played.** The outgoing track runs to the end of the overlap and what comes after is dropped,
+so the planner limits that: by default at most 10 seconds of the outgoing track's music may go unplayed
+(`--max-cut-seconds`, 0 = no limit). If the 8-bar phrase grid can't manage that, it tries 4-, 2- and 1-bar boundaries
+and says so in the plan notes. Trailing silence and very quiet fades don't count as music. The plan summary always
+shows what is skipped ("the last 3.2 s of t1-song is not played") and the overlap length in seconds.
+
+**How long the overlap is.** `--overlap-beats` (default 32, about 15 s at 130 BPM) or `--overlap-seconds 8`, which
+picks the whole number of bars closest to that time at the outgoing track's tempo. Songs with vocals usually sound
+better with a shorter overlap (5-10 s) so two voices aren't on top of each other for long.
+
 Each transition Each transition beat-matches the two tracks (the tempo glides from the
 outgoing track's BPM to the incoming one's over the overlap), lines up their downbeats, and swaps the bass, mids and
 highs at different moments. Options: `--overlap-beats` (default 32 = 8 bars), `--style bass_swap|crossfade`,

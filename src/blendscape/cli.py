@@ -13,7 +13,7 @@ from .analysis import AnalysisError, TrackAnalysis, analyze, with_downbeat
 from .audio import AudioError, load_audio, write_audio
 from .check import click_check, explain_fix
 from .model import MixPlan, PlanError, validate
-from .planner import MAX_STRETCH, make_plan, tempo_gap
+from .planner import DEFAULT_MAX_CUT_S, MAX_STRETCH, make_plan, tempo_gap, unplayed_s
 from .render import render
 from .stretch import StretchError, available, backend
 from .timeline import build_timeline
@@ -77,6 +77,10 @@ def _print_plan_summary(plan: MixPlan, explain: bool = False) -> None:
               f"(out beat {tr.out_beat} @ {a.grid.clock(tr.out_beat)}, "
               f"in beat {tr.in_beat} @ {b.grid.clock(tr.in_beat)}, "
               f"{a.bpm:.1f} -> {b.bpm:.1f} BPM){warn}")
+        cut = unplayed_s(a, tr.out_beat, tr.overlap_beats)
+        length_s = tr.overlap_beats * a.grid.period_s
+        print(f"      overlap {length_s:.1f} s; " + (f"the last {cut:.1f} s of {a.id} is not played" if cut > 1.0
+                                                    else f"{a.id} plays to its end"))
         if tr.score is not None:
             print(f"      score {tr.score:.2f}" + (f"  ({tr.note})" if tr.note else ""))
         if explain:
@@ -106,7 +110,8 @@ def _build_plan(args) -> MixPlan:
     analyses = _analyze_all(args.files, args)
     return make_plan(analyses, overlap_beats=args.overlap_beats, style=args.style, phrase_bars=args.phrase_bars,
                      sample_rate=args.sample_rate, bit_depth=args.bit_depth, ceiling_db=args.ceiling_db,
-                     mix_points=args.mix_points)
+                     mix_points=args.mix_points, overlap_seconds=args.overlap_seconds,
+                     max_cut_s=args.max_cut_seconds)
 
 
 def cmd_click(args) -> int:
@@ -205,6 +210,12 @@ def _add_limiter_opts(p: argparse.ArgumentParser) -> None:
 def _add_plan_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("files", nargs="+", metavar="FILE", help="audio files in mix order")
     p.add_argument("--overlap-beats", type=int, default=32, help="overlap length in beats (default 32 = 8 bars)")
+    p.add_argument("--overlap-seconds", type=float, metavar="S",
+                   help="overlap length in seconds instead (rounded to whole bars at the outgoing track's tempo); "
+                        "overrides --overlap-beats. Shorter (5-10 s) suits vocal tracks")
+    p.add_argument("--max-cut-seconds", type=float, default=DEFAULT_MAX_CUT_S, metavar="S",
+                   help=f"most music of the outgoing track allowed to go unplayed after the overlap "
+                        f"(default {DEFAULT_MAX_CUT_S:.0f}; 0 = no limit)")
     p.add_argument("--style", choices=("bass_swap", "crossfade"), default="bass_swap")
     p.add_argument("--phrase-bars", type=int, default=8, help="phrase length used for mix points (default 8 bars)")
     p.add_argument("--mix-points", choices=("smart", "latest"), default="smart",

@@ -16,7 +16,9 @@ def test_default_plan_is_valid_and_uses_phrase_boundaries():
     assert validate(plan) == []
     for i, tr in enumerate(plan.transitions):
         a = plan.tracks[i]
-        assert (tr.out_beat - a.downbeat) % 32 == 0  # on an 8-bar phrase boundary
+        # on an 8-bar phrase boundary, or (only when that would leave more than the allowed tail unplayed) a 4-bar one
+        finer = "grid to limit the cut" in tr.note
+        assert (tr.out_beat - a.downbeat) % (16 if finer else 32) == 0
         assert tr.out_beat + tr.overlap_beats <= a.n_beats - 1
     # incoming track enters at its first downbeat
     assert [t.in_beat for t in plan.transitions] == [3, 0]

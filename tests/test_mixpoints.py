@@ -148,3 +148,80 @@ def test_bass_clash_is_low_when_both_tracks_are_heavy_together():
 def test_tempo_gap():
     a, b = make_plan([track("a", FULL, bpm=120), track("b", FULL, bpm=130)], overlap_beats=32).tracks
     assert tempo_gap(a, b) == pytest.approx(130 / 120 - 1)
+
+
+# ---------- not throwing away the end of the outgoing track ----------
+from blendscape.planner import DEFAULT_MAX_CUT_S, overlap_beats_for_seconds, unplayed_s  # noqa: E402
+
+
+def metal_like(bpm=150.0):
+    """A loud song followed by a long quiet ending that the section detector calls an outro."""
+    return track("metal", [("intro", 4), ("body", 52), ("outro", 24)], bpm=bpm)
+
+
+def cut_of(plan, i=0):
+    tr = plan.transitions[i]
+    return unplayed_s(plan.tracks[i], tr.out_beat, tr.overlap_beats)
+
+
+def test_a_long_quiet_ending_no_longer_costs_the_end_of_the_track():
+    """Regression: 'leave at the start of the outro' used to drop 27 s of a 24-bar ending at 150 BPM."""
+    plan = make_plan([metal_like(), track("next", FULL, bpm=150.0)], overlap_beats=32)
+    assert cut_of(plan) <= DEFAULT_MAX_CUT_S
+    assert cut_of(plan) < 5  # in practice the new tail score pulls it much closer
+
+
+def test_the_cap_is_a_hard_limit_and_the_soft_score_helps_even_without_it():
+    for cap in (5.0, 10.0, 20.0):
+        plan = make_plan([metal_like(), track("next", FULL, bpm=150.0)], overlap_beats=32, max_cut_s=cap)
+        assert cut_of(plan) <= cap, cap
+    uncapped = make_plan([metal_like(), track("next", FULL, bpm=150.0)], overlap_beats=32, max_cut_s=None)
+    assert cut_of(uncapped) < 10  # the soft term alone already avoids the worst case
+    zero = make_plan([metal_like(), track("next", FULL, bpm=150.0)], overlap_beats=32, max_cut_s=0)
+    assert cut_of(zero) == pytest.approx(cut_of(uncapped))  # 0 means "no cap"
+
+
+def test_a_coarse_phrase_grid_falls_back_to_shorter_phrases_to_honour_the_cap():
+    # 80 bars at 150 BPM, overlap 8 bars: 8-bar phrase boundaries leave 12.8 s after the last overlap that fits
+    a = track("a", [("body", 76)], bpm=150.0, tail_bars=0)  # ends at bar 76: grid of 8 bars => out at 64 (cut 4 bars)
+    plan = make_plan([a, track("b", FULL, bpm=150.0)], overlap_beats=32, max_cut_s=3.0, phrase_bars=8)
+    tr = plan.transitions[0]
+    assert cut_of(plan) <= 3.0
+    assert (tr.out_beat - plan.tracks[0].downbeat) % 32 != 0 and "grid to limit the cut" in tr.note
+
+
+def test_says_so_when_the_cap_cannot_be_met():
+    # the outgoing track ends with 4 minutes of music that cannot be reached by any overlap that fits
+    a = track("a", [("body", 20)], bpm=150.0)
+    a.active_end_s = a.duration_s  # explicit
+    plan = make_plan([a, track("b", FULL, bpm=150.0)], overlap_beats=64, max_cut_s=0.5)
+    assert "could not keep the cut" in plan.transitions[0].note or cut_of(plan) <= 0.5
+
+
+def test_trailing_silence_is_not_counted_as_music_to_protect():
+    a = track("a", FULL, bpm=120.0, tail_bars=15)  # 30 s of file after bar 56...
+    a.active_end_s = a.duration_s - 30.0  # ...but the last 30 s are silent
+    plan = make_plan([a, track("b", FULL)], overlap_beats=32)
+    t = plan.transitions[0]
+    assert plan.tracks[0].end_s == pytest.approx(a.duration_s - 30.0, abs=0.01)
+    assert cut_of(plan) <= DEFAULT_MAX_CUT_S  # measured against the music, not the file
+    assert t.out_beat == 4 * 48
+
+
+def test_end_s_falls_back_to_the_duration_when_unknown():
+    a = track("a", FULL)
+    plan = make_plan([a, track("b", FULL)], overlap_beats=32)
+    assert a.active_end_s == 0 and plan.tracks[0].end_s == plan.tracks[0].duration_s
+
+
+def test_overlap_by_seconds_rounds_to_whole_bars_at_the_outgoing_tempo():
+    assert overlap_beats_for_seconds(8, 150) == 20  # 20 beats at 150 BPM = 8.0 s
+    assert overlap_beats_for_seconds(10, 120) == 20  # 10 s = 20 beats = 5 bars
+    assert overlap_beats_for_seconds(5, 80) == 8  # 6.7 beats -> 2 bars
+    assert overlap_beats_for_seconds(0.5, 120) == 4  # never less than a bar
+    plan = make_plan([track("a", FULL, bpm=120.0), track("b", FULL, bpm=90.0), track("c", FULL, bpm=90.0)],
+                     overlap_beats=32, overlap_seconds=10)
+    assert [t.overlap_beats for t in plan.transitions] == [20, 16]  # 10 s at 120 BPM, then at 90 BPM (15 beats -> 16)
+    for i, t in enumerate(plan.transitions):
+        assert abs(t.overlap_beats * plan.tracks[i].grid.period_s - 10) < 2.5  # within half a bar of the target
+    assert validate(plan) == []

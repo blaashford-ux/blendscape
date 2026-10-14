@@ -211,3 +211,21 @@ def test_low_confidence_is_called_out_in_the_plan_summary(tmp_path, capsys):
     plan = tmp_path / "plan.json"
     assert main(["plan", p, p, "-o", str(plan), "--overlap-beats", "16"]) == 0
     assert "downbeat unsure" in capsys.readouterr().out
+
+
+def test_overlap_seconds_and_cap_options_and_the_unplayed_tail_in_the_summary(tracks, tmp_path, capsys):
+    plan = tmp_path / "plan.json"
+    assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-seconds", "6",
+                 "--max-cut-seconds", "5"]) == 0
+    out = capsys.readouterr().out
+    d = json.loads(plan.read_text())
+    n = d["transitions"][0]["overlap_beats"]
+    assert n % 4 == 0 and abs(n * 60 / 124 - 6) < 1.5  # about 6 s at 124 BPM, whole bars
+    assert "overlap " in out and ("is not played" in out or "plays to its end" in out)
+    assert d["tracks"][0]["active_end_s"] > 0
+
+
+def test_no_cap_flag_zero_means_unlimited(tracks, tmp_path):
+    plan = tmp_path / "plan.json"
+    assert main(["plan", tracks["a"][0], tracks["b"][0], "-o", str(plan), "--overlap-beats", "16",
+                 "--max-cut-seconds", "0"]) == 0
