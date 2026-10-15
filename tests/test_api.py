@@ -525,7 +525,7 @@ def test_web_ui_assets_have_correct_mime(tmp_path, monkeypatch):
     (web / "assets").mkdir(parents=True)
     (web / "index.html").write_text("<html></html>")
     (web / "assets" / "a.js").write_text("export {}")
-    mimetypes.add_type("text/plain", ".js")  # what a misconfigured Windows registry reports
+    monkeypatch.setattr(mimetypes, "guess_type", lambda *a, **k: ("text/plain", None))  # misconfigured Windows registry
     app = create_app(home=tmp_path / "home", web_dir=web)
     r = TestClient(app).get("/assets/a.js")
     assert r.headers["content-type"].startswith("text/javascript")
