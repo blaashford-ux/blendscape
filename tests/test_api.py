@@ -529,3 +529,4 @@ def test_web_ui_assets_have_correct_mime(tmp_path, monkeypatch):
     app = create_app(home=tmp_path / "home", web_dir=web)
     r = TestClient(app).get("/assets/a.js")
     assert r.headers["content-type"].startswith("text/javascript")
+    assert r.headers["cache-control"] == "no-cache"
