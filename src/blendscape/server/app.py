@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import mimetypes
 import os
 import time
 from contextlib import asynccontextmanager
@@ -654,6 +655,11 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
     # ---------- web UI (built in milestone 4) ----------
     web = Path(web_dir or os.environ.get("BLENDSCAPE_WEB") or Path(__file__).resolve().parents[3] / "web" / "dist")
     if web.is_dir():
+        # Windows takes MIME types from the registry, where .js is often text/plain; browsers refuse to run
+        # module scripts served that way (blank page). Pin the types the built UI needs.
+        for ext, mt in ((".js", "text/javascript"), (".mjs", "text/javascript"), (".css", "text/css"),
+                        (".map", "application/json"), (".svg", "image/svg+xml")):
+            mimetypes.add_type(mt, ext)
         app.mount("/", StaticFiles(directory=web, html=True), name="web")
     else:
         @app.get("/", include_in_schema=False)

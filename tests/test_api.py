@@ -512,3 +512,20 @@ def test_render_name_is_sanitised(client, planned):
     if r.status_code == 202:
         client.delete(f"/api/jobs/{r.json()['id']}")
     assert client.post(f"/api/projects/{planned['id']}/render", json={"name": "///"}).status_code == 422
+
+
+def test_web_ui_assets_have_correct_mime(tmp_path, monkeypatch):
+    import mimetypes
+
+    from fastapi.testclient import TestClient
+
+    from blendscape.server.app import create_app
+
+    web = tmp_path / "dist"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("<html></html>")
+    (web / "assets" / "a.js").write_text("export {}")
+    mimetypes.add_type("text/plain", ".js")  # what a misconfigured Windows registry reports
+    app = create_app(home=tmp_path / "home", web_dir=web)
+    r = TestClient(app).get("/assets/a.js")
+    assert r.headers["content-type"].startswith("text/javascript")
