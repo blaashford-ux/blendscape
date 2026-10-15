@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 import json
-import mimetypes
 import os
 import time
 from contextlib import asynccontextmanager
@@ -226,6 +225,22 @@ def _track_entry(path: Path, name: str, source: str, size: int) -> dict:
 # ======================================================================================================
 # the app
 # ======================================================================================================
+# Windows takes MIME types from the registry, where .js is often text/plain, and browsers refuse to run module
+# scripts served that way (blank page). So the UI's file types are pinned here rather than looked up.
+_UI_TYPES = {".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+             ".css": "text/css; charset=utf-8", ".map": "application/json", ".svg": "image/svg+xml",
+             ".html": "text/html; charset=utf-8", ".json": "application/json"}
+
+
+class _UIFiles(StaticFiles):
+    def file_response(self, full_path, *args, **kwargs):
+        resp = super().file_response(full_path, *args, **kwargs)
+        mt = _UI_TYPES.get(Path(str(full_path)).suffix.lower())
+        if mt:
+            resp.headers["content-type"] = mt
+        return resp
+
+
 def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path | str | None = None) -> FastAPI:
     store = ProjectStore(home)
     jobs = JobManager(workers)
@@ -655,12 +670,7 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
     # ---------- web UI (built in milestone 4) ----------
     web = Path(web_dir or os.environ.get("BLENDSCAPE_WEB") or Path(__file__).resolve().parents[3] / "web" / "dist")
     if web.is_dir():
-        # Windows takes MIME types from the registry, where .js is often text/plain; browsers refuse to run
-        # module scripts served that way (blank page). Pin the types the built UI needs.
-        for ext, mt in ((".js", "text/javascript"), (".mjs", "text/javascript"), (".css", "text/css"),
-                        (".map", "application/json"), (".svg", "image/svg+xml")):
-            mimetypes.add_type(mt, ext)
-        app.mount("/", StaticFiles(directory=web, html=True), name="web")
+        app.mount("/", _UIFiles(directory=web, html=True), name="web")
     else:
         @app.get("/", include_in_schema=False)
         def index():
