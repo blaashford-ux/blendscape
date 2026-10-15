@@ -238,6 +238,8 @@ class _UIFiles(StaticFiles):
         mt = _UI_TYPES.get(Path(str(full_path)).suffix.lower())
         if mt:
             resp.headers["content-type"] = mt
+        # always revalidate (cheap 304 via ETag): index.html isn't hashed, and a wrongly-typed copy must not stick
+        resp.headers["cache-control"] = "no-cache"
         return resp
 
 
