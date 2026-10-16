@@ -49,14 +49,15 @@ describe("ProjectView: a planned project", () => {
     expect(await screen.findByRole("region", { name: "Mix timeline" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue("Test mix"));
     expect(screen.getAllByText("song0.wav").length).toBeGreaterThan(0);
-    expect(screen.getByRole("region", { name: "Transition 1" })).toBeInTheDocument();
+    // the first transition is selected by an effect just after the first render, so wait for it
+    expect(await screen.findByRole("region", { name: "Transition 1" })).toBeInTheDocument();
   });
 
   it("switches transitions from the timeline", async () => {
     mount();
     await screen.findByRole("region", { name: "Mix timeline" });
     await userEvent.click(screen.getByRole("button", { name: /Transition 2: song1\.wav into song2\.wav/ }));
-    expect(screen.getByRole("region", { name: "Transition 2" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Transition 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Transition 2:/ })).toHaveAttribute("aria-pressed", "true");
   });
 
