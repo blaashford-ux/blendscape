@@ -53,6 +53,20 @@ export function gridLines(g: Grid, t0: number, t1: number, phraseBars = 8): Grid
   return out;
 }
 
+/** The beat nearest to time t, on the bar lines (step 4) or on any beat (step 1); never before the file starts. */
+export function snapBeat(g: Grid, t: number, step: number): number {
+  const k = (t - g.offset_s) / periodS(g);
+  let beat = Math.round(g.downbeat + Math.round((k - g.downbeat) / step) * step);
+  while (beat < 0) beat += step; // before the start of the file: the first line at or after it
+  return beat;
+}
+
+/** An overlap length in beats for an end marker dragged to time t: whole bars (or beats), at least one bar. */
+export function snapOverlap(g: Grid, startBeat: number, t: number, step: number): number {
+  const k = (t - g.offset_s) / periodS(g);
+  return Math.max(BEATS_PER_BAR, Math.round((k - startBeat) / step) * step);
+}
+
 /** Move a beat by whole bars, never below 0. */
 export const nudgeBeat = (beat: number, bars: number) => Math.max(0, beat + bars * BEATS_PER_BAR);
 

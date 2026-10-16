@@ -147,6 +147,9 @@ progress { accent-color: var(--accent); width: 160px; height: 10px; }
 .waveform { position: relative; width: 100%; background: transparent; }
 .waveform canvas { display: block; }
 .waveform.clickable { cursor: pointer; }
+.marker-handle { position: absolute; top: 0; bottom: 0; width: 16px; margin-left: -8px; cursor: ew-resize; touch-action: none; z-index: 2; }
+.marker-handle::before { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 26px; margin: -13px 0 0 -3px; border-radius: 3px; background: var(--handle-color); opacity: .55; }
+.marker-handle:hover::before, .marker-handle:active::before { opacity: 1; }
 .marker-label { position: absolute; top: 2px; transform: translateX(3px); font-size: 11px; background: #000a; border-left: 2px solid; padding: 0 4px; border-radius: 2px; pointer-events: none; white-space: nowrap; }
 
 /* transition editor */
@@ -195,3 +198,7 @@ label.radio { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .player-seek input { width: 100%; position: relative; z-index: 1; }
 .player-region { position: absolute; top: 50%; height: 14px; transform: translateY(-50%); background: rgba(255, 200, 80, 0.35); border-radius: 3px; }
 .player-time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 110px; text-align: right; }
+
+.reset-btn { margin-left: auto; }
+.chip.edited { background: #5a4a1a; color: #ffd98a; }
+.drag-hint { margin: -2px 0 8px; min-height: 1.4em; }

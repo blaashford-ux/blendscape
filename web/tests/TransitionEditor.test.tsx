@@ -172,10 +172,16 @@ describe("TransitionEditor: alternatives, reset, errors, preview", () => {
     await click("Use alternative 2");
     expect(api.useAlternative).toHaveBeenCalledWith("p_abc123", 0, 1);
   });
-  it("resets to the planner's choice", async () => {
-    setup();
+  it("resets an edited transition to the planner's choice", async () => {
+    setup({ tr: { edited: true } });
+    expect(screen.getByText("edited")).toBeInTheDocument();
     await click(/Reset to the planner's choice/);
     expect(api.resetTransition).toHaveBeenCalledWith("p_abc123", 0);
+  });
+  it("has nothing to reset until you change something", () => {
+    setup();
+    expect(screen.getByRole("button", { name: /Reset to the planner's choice/ })).toBeDisabled();
+    expect(screen.queryByText("edited")).not.toBeInTheDocument();
   });
   it("shows why an edit was refused, with every problem listed", async () => {
     vi.mocked(api.patchTransition).mockRejectedValue(new ApiError(422, "invalid plan", ["out_beat 999 runs past the end", "overlaps collide"]));
@@ -201,5 +207,64 @@ describe("TransitionEditor: alternatives, reset, errors, preview", () => {
     expect(screen.getByRole("button", { name: /Preview this transition/ })).toBeDisabled();
     await click("Cancel preview");
     expect(preview.onCancel).toHaveBeenCalled();
+  });
+});
+
+describe("TransitionEditor: dragging markers", () => {
+  // the waveforms are 600 px wide in jsdom terms; the strip shows SPAN_BEFORE (30 s) + overlap + 12 s
+  const rect = { left: 0, top: 0, width: 600, height: 92, right: 600, bottom: 92, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect);
+  });
+  // track0: 120 bpm, offset 0.3 s, bar lines on beats 1, 5, 9, ... (see fixtures): beat k is at 0.3 + k/2 s. Strip A starts at out_time - 30 = 50.3 s
+  // and spans 58 s here (16 s overlap + 42), so 600 px = 58 s.
+  const pxAt = (t: number) => ((t - 50.3) / 58) * 600;
+  const drag = (id: string, toT: number, opts: { shiftKey?: boolean } = {}) => {
+    const h = screen.getByTestId(`handle-${id}`);
+    fireEvent.pointerDown(h, { clientX: 0, pointerId: 1, ...opts });
+    fireEvent.pointerMove(h, { clientX: pxAt(toT), pointerId: 1, ...opts });
+    fireEvent.pointerUp(h, { clientX: pxAt(toT), pointerId: 1, ...opts });
+  };
+
+  it("has a handle on each of the four markers", () => {
+    setup();
+    for (const id of ["out", "end-a", "in", "end-b"]) expect(screen.getByTestId(`handle-${id}`)).toBeInTheDocument();
+  });
+  it("dragging 'leaves' saves the nearest bar line", async () => {
+    setup();
+    drag("out", 0.3 + 169 / 2 + 0.4); // just past beat 169, a bar line
+    await waitFor(() => expect(api.patchTransition).toHaveBeenCalledWith("p_abc123", 0, { out_beat: 169 }));
+  });
+  it("snaps to single beats while Shift is held", async () => {
+    setup();
+    drag("out", 0.3 + 167 / 2, { shiftKey: true });
+    await waitFor(() => expect(api.patchTransition).toHaveBeenCalledWith("p_abc123", 0, { out_beat: 167 }));
+  });
+  it("dragging 'overlap ends' sets the overlap in whole bars, at least one", async () => {
+    setup();
+    drag("end-a", 0.3 + (160 + 16) / 2); // 16 beats after the start
+    await waitFor(() => expect(api.patchTransition).toHaveBeenCalledWith("p_abc123", 0, { overlap_beats: 16 }));
+    vi.mocked(api.patchTransition).mockClear();
+    drag("end-a", 0.3 + 150 / 2); // before the start: clamps to a bar
+    await waitFor(() => expect(api.patchTransition).toHaveBeenCalledWith("p_abc123", 0, { overlap_beats: 4 }));
+  });
+  it("shows the new numbers while dragging, and saves nothing if you drop it where it was", async () => {
+    setup();
+    const h = screen.getByTestId("handle-out");
+    fireEvent.pointerDown(h, { clientX: 0, pointerId: 1 });
+    fireEvent.pointerMove(h, { clientX: pxAt(0.3 + 153 / 2), pointerId: 1 });
+    expect(screen.getByText(/song0\.wav leaves at 1:16\.8/)).toBeInTheDocument();
+    const back = { clientX: pxAt(0.3 + 160 / 2), pointerId: 1, shiftKey: true }; // beat 160 is where it started
+    fireEvent.pointerMove(h, back);
+    fireEvent.pointerUp(h, back);
+    await waitFor(() => expect(screen.queryByText(/ · overlap \d+ beats/)).not.toBeInTheDocument());
+    expect(api.patchTransition).not.toHaveBeenCalled();
+  });
+  it("a cancelled drag changes nothing", () => {
+    setup();
+    const h = screen.getByTestId("handle-in");
+    fireEvent.pointerDown(h, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerCancel(h, { pointerId: 1 });
+    expect(api.patchTransition).not.toHaveBeenCalled();
   });
 });

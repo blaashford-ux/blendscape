@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { EqCurves, Project, Style, Transition, TransitionPatch } from "../api/types";
-import { BEATS_PER_BAR, barOf, beatTime, fmtTime, overlapBeatsForSeconds, type Grid } from "../lib/timeline";
+import { BEATS_PER_BAR, barOf, beatTime, fmtTime, overlapBeatsForSeconds, snapBeat, snapOverlap, type Grid } from "../lib/timeline";
 import type { JobRun } from "../state/useJobRunner";
 import { usePlayer } from "../state/usePlayer";
 import { EqGraph } from "./EqGraph";
-import { Waveform } from "./Waveform";
+import { Waveform, type MarkerDrag } from "./Waveform";
 import { usePeaks } from "../state/useProject";
 
 interface Props {
@@ -30,8 +30,13 @@ export function TransitionEditor({ project, index, onProject, preview }: Props) 
   const [error, setError] = useState<{ message: string; errors: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const phraseBeats = project.settings.phrase_bars * BEATS_PER_BAR;
+  // while a marker is being dragged, what the plan would be if it were dropped now
+  const [drag, setDrag] = useState<TransitionPatch>({});
 
-  useEffect(() => setError(null), [index]);
+  useEffect(() => {
+    setError(null);
+    setDrag({});
+  }, [index]);
 
   const call = async (fn: () => Promise<Project>) => {
     setBusy(true);
@@ -57,9 +62,35 @@ export function TransitionEditor({ project, index, onProject, preview }: Props) 
   );
   if (!tr || !a || !b || !gridA || !gridB) return null;
 
-  const endA = beatTime(a, tr.out_beat + tr.overlap_beats); // where the overlap ends in each file
-  const endB = beatTime(b, tr.in_beat + tr.overlap_beats);
-  const span = Math.max(endA - tr.out_time_s, endB - tr.in_time_s) + SPAN_BEFORE + SPAN_AFTER;
+  const outBeat = drag.out_beat ?? tr.out_beat;
+  const inBeat = drag.in_beat ?? tr.in_beat;
+  const overlapBeats = drag.overlap_beats ?? tr.overlap_beats;
+  const outTime = beatTime(a, outBeat);
+  const inTime = beatTime(b, inBeat);
+  const endA = beatTime(a, outBeat + overlapBeats); // where the overlap ends in each file
+  const endB = beatTime(b, inBeat + overlapBeats);
+  // the view is laid out from the saved plan, so it holds still while you drag
+  const span =
+    Math.max(beatTime(a, tr.out_beat + tr.overlap_beats) - tr.out_time_s, beatTime(b, tr.in_beat + tr.overlap_beats) - tr.in_time_s) +
+    SPAN_BEFORE +
+    SPAN_AFTER;
+  const dragging = Object.keys(drag).length > 0;
+
+  /** A marker is being dragged (or dropped): snap to bars (beats with Shift), preview it, and save on drop. */
+  const onDrag = (d: MarkerDrag) => {
+    const step = d.fine ? 1 : BEATS_PER_BAR;
+    let next: TransitionPatch;
+    if (d.id === "out") next = { out_beat: snapBeat(a, d.t, step) };
+    else if (d.id === "in") next = { in_beat: snapBeat(b, d.t, step) };
+    else if (d.id === "end-a") next = { overlap_beats: snapOverlap(a, outBeat, d.t, step) };
+    else next = { overlap_beats: snapOverlap(b, inBeat, d.t, step) };
+    if (d.phase === "move") return setDrag(next);
+    if (d.phase === "cancel") return setDrag({});
+    const [key, value] = Object.entries(next)[0] as [keyof TransitionPatch, number];
+    setDrag(next);
+    if (tr[key as "out_beat" | "in_beat" | "overlap_beats"] === value) return setDrag({});
+    void patch(next).then(() => setDrag({}));
+  };
   const a0 = tr.out_time_s - SPAN_BEFORE;
   const b0 = tr.in_time_s - 10;
   const OVERLAP = "rgba(255, 200, 80, 0.16)";
@@ -76,9 +107,18 @@ export function TransitionEditor({ project, index, onProject, preview }: Props) 
           Transition {index + 1}: <span className="nowrap">{a.name}</span> → <span className="nowrap">{b.name}</span>
         </h2>
         {tr.score !== null && <span className="chip" title="The planner's score for this choice">score {tr.score.toFixed(2)}</span>}
+        {tr.edited && <span className="chip edited" title="You changed this transition by hand">edited</span>}
         <span className="muted small">
           mix {fmtTime(tr.start_s)}–{fmtTime(tr.end_s)} · {tr.overlap_s.toFixed(1)} s overlap
         </span>
+        <button
+          className="reset-btn"
+          disabled={busy || !tr.edited}
+          onClick={() => call(() => api.resetTransition(project.id, index))}
+          title={tr.edited ? "Forget your changes and go back to what the planner first suggested" : "Nothing to reset: this is the planner's choice"}
+        >
+          Reset to the planner's choice
+        </button>
       </div>
       {tr.note && <p className="note small">{tr.note}</p>}
       {trackWarnings.map((w) => (
@@ -101,11 +141,12 @@ export function TransitionEditor({ project, index, onProject, preview }: Props) 
             color="#7cc4ff"
             grid={gridA}
             sections={a.sections}
-            regions={[{ t0: tr.out_time_s, t1: endA, color: OVERLAP }]}
+            regions={[{ t0: outTime, t1: endA, color: OVERLAP }]}
             markers={[
-              { t: tr.out_time_s, color: "#ffcc4d", label: "leaves" },
-              { t: endA, color: "#ff7a7a", label: "overlap ends" },
+              { id: "out", t: outTime, color: "#ffcc4d", label: "leaves", draggable: true },
+              { id: "end-a", t: endA, color: "#ff7a7a", label: "overlap ends", draggable: true },
             ]}
+            onMarkerDrag={onDrag}
             onSeek={audition(a.id, a.name)}
             label={`${a.name} around the transition`}
           />
@@ -122,16 +163,23 @@ export function TransitionEditor({ project, index, onProject, preview }: Props) 
             color="#ff9f6b"
             grid={gridB}
             sections={b.sections}
-            regions={[{ t0: tr.in_time_s, t1: endB, color: OVERLAP }]}
+            regions={[{ t0: inTime, t1: endB, color: OVERLAP }]}
             markers={[
-              { t: tr.in_time_s, color: "#ffcc4d", label: "enters" },
-              { t: endB, color: "#ff7a7a", label: "overlap ends" },
+              { id: "in", t: inTime, color: "#ffcc4d", label: "enters", draggable: true },
+              { id: "end-b", t: endB, color: "#ff7a7a", label: "overlap ends", draggable: true },
             ]}
+            onMarkerDrag={onDrag}
             onSeek={audition(b.id, b.name)}
             label={`${b.name} around the transition`}
           />
         </div>
       </div>
+
+      <p className="small drag-hint muted" aria-live="polite">
+        {dragging
+          ? `${a.name} leaves at ${fmtTime(outTime)} · ${b.name} enters at ${fmtTime(inTime)} · overlap ${overlapBeats} beats (${overlapBeats / BEATS_PER_BAR} bars)`
+          : "Drag the yellow and red markers to move them: they snap to bars; hold Shift to snap to single beats."}
+      </p>
 
       <div className="controls">
         <PointControl
@@ -225,9 +273,6 @@ export function TransitionEditor({ project, index, onProject, preview }: Props) 
           ▶ Preview this transition
         </button>
         {previewing && <button onClick={preview.onCancel}>Cancel preview</button>}
-        <button disabled={busy} onClick={() => call(() => api.resetTransition(project.id, index))} title="Forget your changes and let the planner choose again">
-          Reset to the planner's choice
-        </button>
       </div>
     </section>
   );

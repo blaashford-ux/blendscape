@@ -285,3 +285,37 @@ def test_serve_explains_missing_packages(monkeypatch, capsys):
     monkeypatch.setattr(builtins, "__import__", fake)
     assert main(["serve"]) == 2
     assert 'pip install -e ".[api]"' in capsys.readouterr().err
+
+
+def test_serve_says_whether_rubber_band_was_found_and_takes_a_path(tmp_path, monkeypatch, capsys):
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    from blendscape import stretch
+
+    monkeypatch.setattr(stretch, "_lib", None)  # this machine may have librubberband too
+    monkeypatch.delenv("RUBBERBAND", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    home = str(tmp_path / "h")
+    assert main(["serve", "--home", home]) == 0
+    assert "Rubber Band: NOT FOUND" in capsys.readouterr().err
+
+    assert main(["serve", "--home", home, "--rubberband", str(tmp_path / "nope.exe")]) == 2
+    assert "no such file" in capsys.readouterr().err
+
+    exe = tmp_path / "rubberband.exe"
+    exe.write_text("")
+    assert main(["serve", "--home", home, "--rubberband", str(exe)]) == 0
+    assert "Rubber Band: found (cli)" in capsys.readouterr().err
+    monkeypatch.delenv("RUBBERBAND")
+
+
+def test_a_rubberband_variable_pointing_nowhere_does_not_hide_the_one_on_path(tmp_path, monkeypatch):
+    from blendscape import stretch
+
+    exe = tmp_path / "rubberband"
+    exe.write_text("")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("RUBBERBAND", str(tmp_path / "gone"))
+    assert stretch._cli_path() == str(exe)

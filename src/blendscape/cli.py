@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -140,11 +141,25 @@ def cmd_serve(args) -> int:
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print(f"warning: serving on {args.host}: anyone who can reach this port can read files from this computer "
               f"through the API. Only do this on a network you trust.", file=sys.stderr)
+    if args.rubberband:
+        if not os.path.isfile(args.rubberband):
+            print(f"error: --rubberband: no such file: {args.rubberband}", file=sys.stderr)
+            return 2
+        os.environ["RUBBERBAND"] = args.rubberband
+    elif os.environ.get("RUBBERBAND") and not os.path.isfile(os.environ["RUBBERBAND"]):
+        print(f"warning: RUBBERBAND is set to {os.environ['RUBBERBAND']!r}, which is not a file", file=sys.stderr)
     app = create_app(home=args.home)
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}"
     built = any(getattr(r, "name", "") == "web" for r in app.routes)
     web = "web UI at /" if built else "web UI not built: see README"
     print(f"Blendscape on {url}  ({web}; API docs at /docs; data in {app.state.store.home})", file=sys.stderr)
+    from . import stretch
+
+    if stretch.available():
+        print(f"Rubber Band: found ({stretch.backend()}); previews and renders are available", file=sys.stderr)
+    else:
+        print("Rubber Band: NOT FOUND, so previews and renders are unavailable. Point to it with "
+              "--rubberband PATH\\to\\rubberband.exe (or set RUBBERBAND) and restart.", file=sys.stderr)
     if args.open:
         import threading
         import webbrowser
@@ -282,6 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--home", help="where projects are stored (default: ~/.local/share/blendscape or $BLENDSCAPE_HOME)")
     p.add_argument("--open", action="store_true", help="open the web UI in your browser")
+    p.add_argument("--rubberband", metavar="PATH", help="the rubberband executable (default: $RUBBERBAND, then PATH)")
     p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("plan", help="analyse files and write an editable mix_plan.json")
