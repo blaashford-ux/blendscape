@@ -58,6 +58,7 @@ export function transition(i: number, over: Partial<Transition> = {}): Transitio
     note: "A leaves at the start of its outro",
     eq: EQ,
     warnings: [],
+    edited: false,
     alternatives: [
       { out_beat: 128, in_beat: 1, score: 0.8, note: "A leaves from the middle of a body", out_time_s: 64.3, in_time_s: 0.8 },
       { out_beat: 160, in_beat: 33, score: 0.7, note: "B enters at a section start", out_time_s: 80.3, in_time_s: 16.3 },

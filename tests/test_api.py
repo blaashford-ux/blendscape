@@ -290,7 +290,9 @@ def test_edits_survive_replanning_and_can_be_reset(client, planned):
     p = client.post(f"/api/projects/{pid}/plan").json()
     assert p["plan"]["transitions"][1]["overlap_beats"] == 12  # the hand edit wins over the new global setting
     assert p["plan"]["transitions"][0]["overlap_beats"] == 8
+    assert [t["edited"] for t in p["plan"]["transitions"]] == [False, True]
     p = client.delete(f"/api/projects/{pid}/plan/transitions/1/override").json()
+    assert [t["edited"] for t in p["plan"]["transitions"]] == [False, False]
     assert p["plan"]["transitions"][1]["overlap_beats"] == 8 and p["plan"]["transitions"][1]["note"] != "edited by hand"
 
 

@@ -12,7 +12,8 @@ Project description goes here.
 Needs Python 3.10+ and the [Rubber Band](https://breakfastquay.com/rubberband/) command-line tool (v3+; used for
 time-stretching). On Linux/macOS install it with your package manager (`apt install rubberband-cli`,
 `brew install rubberband`). On Windows download the executable zip, unzip it, and either put its folder on `PATH` or
-set `RUBBERBAND` to the full path of `rubberband.exe`.
+set `RUBBERBAND` to the full path of `rubberband.exe` (or start the web UI with `blendscape serve --rubberband PATH`;
+the variable only lasts for the terminal you set it in, unless you set it as a permanent user variable).
 
 ```bash
 python -m venv .venv
@@ -107,8 +108,9 @@ Open the page, name a mix, drop in your songs (or add them by file path), and it
 
 - **The mix**: every track on the output timeline with the overlaps shaded. Click an overlap to edit that transition.
 - **Transition editor**: both songs zoomed around the mix point, with their beat grid and sections (intro / body /
-  breakdown / outro). Move where the first leaves and the second enters by a bar or a phrase, set the overlap, choose
-  bass-swap or plain crossfade, fine-tune the frequency swap, try the planner's other choices, and **preview** just that
+  breakdown / outro). Drag the *leaves*, *enters* and *overlap ends* markers (they snap to bars; hold Shift for single beats) or use the
+  nudge buttons, set the overlap, choose
+  bass-swap or plain crossfade, **reset** an edited transition to what the planner first suggested, fine-tune the frequency swap, try the planner's other choices, and **preview** just that
   transition before rendering anything.
 - **Tracks**: drag to reorder; each shows how sure the bar line is, with buttons to shift it and a click-track to check
   it by ear.

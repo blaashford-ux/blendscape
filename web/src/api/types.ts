@@ -108,6 +108,8 @@ export interface Transition {
   eq: EqCurves;
   warnings: string[];
   alternatives: Alternative[];
+  /** You changed this transition by hand (Reset goes back to the planner's choice). */
+  edited: boolean;
 }
 
 export interface PlanDescription {

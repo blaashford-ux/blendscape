@@ -168,6 +168,8 @@ def project_view(store: ProjectStore, proj: dict) -> dict:
         errs = validate(plan)
         names = {t["id"]: t["name"] for t in proj["tracks"]}  # what the user called them, not the stored file name
         desc = describe_plan(plan, names) if not errs else None
+        for t in (desc or {}).get("transitions", []):
+            t["edited"] = _pair(t["from"], t["to"]) in proj["overrides"]  # drives the "reset" button
     return {
         "id": proj["id"], "name": proj["name"], "created": proj["created"], "updated": proj["updated"],
         "settings": proj["settings"], "tracks": [track_view(store, proj, t) for t in proj["tracks"]],

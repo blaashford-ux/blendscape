@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import type { Peaks, Section } from "../api/types";
 import { beatTime, gridLines, SECTION_COLORS, type Grid } from "../lib/timeline";
 import { peakColumns } from "../lib/waveform";
@@ -7,6 +7,19 @@ export interface Marker {
   t: number; // file seconds
   color: string;
   label?: string;
+  /** Identifies the marker in `onMarkerDrag`; required for `draggable`. */
+  id?: string;
+  /** The user can drag this marker sideways (see `onMarkerDrag`). */
+  draggable?: boolean;
+}
+
+export interface MarkerDrag {
+  id: string;
+  /** Where the pointer is, in file seconds (not snapped: the caller decides how to snap). */
+  t: number;
+  phase: "move" | "end" | "cancel";
+  /** Shift held: the caller may snap finer. */
+  fine: boolean;
 }
 
 export interface Region {
@@ -31,6 +44,7 @@ export interface WaveformProps {
   /** Fixed pixel width. Omit to fill the parent. */
   width?: number;
   onSeek?: (t: number) => void;
+  onMarkerDrag?: (d: MarkerDrag) => void;
   label: string;
 }
 
@@ -39,7 +53,7 @@ const css = (name: string, fallback: string) =>
 
 /** A waveform drawn on a canvas, with optional beat grid, song sections, markers and shaded regions on top. */
 export function Waveform(props: WaveformProps) {
-  const { peaks, t0, t1, height = 72, color = "#7cc4ff", grid, showGrid = true, sections, markers, regions, onSeek, label } = props;
+  const { peaks, t0, t1, height = 72, color = "#7cc4ff", grid, showGrid = true, sections, markers, regions, onSeek, onMarkerDrag, label } = props;
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [measured, setMeasured] = useState(props.width ?? 600);
@@ -133,6 +147,41 @@ export function Waveform(props: WaveformProps) {
     onSeek(t0 + ((e.clientX - r.left) / r.width) * (t1 - t0));
   };
 
+  const dragging = useRef<string | null>(null);
+  const timeAt = (clientX: number) => {
+    const r = box.current!.getBoundingClientRect();
+    return t0 + ((clientX - r.left) / (r.width || 1)) * (t1 - t0);
+  };
+  const handle = (m: Marker) => {
+    const id = m.id!;
+    const emit = (e: PointerEvent<HTMLDivElement>, phase: MarkerDrag["phase"]) =>
+      onMarkerDrag?.({ id, t: timeAt(e.clientX), phase, fine: e.shiftKey });
+    return {
+      onClick: (e: MouseEvent) => e.stopPropagation(),
+      onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        dragging.current = id;
+        emit(e, "move");
+      },
+      onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
+        if (dragging.current === id) emit(e, "move");
+      },
+      onPointerUp: (e: PointerEvent<HTMLDivElement>) => {
+        if (dragging.current !== id) return;
+        dragging.current = null;
+        emit(e, "end");
+      },
+      onPointerCancel: (e: PointerEvent<HTMLDivElement>) => {
+        if (dragging.current !== id) return;
+        dragging.current = null;
+        emit(e, "cancel");
+      },
+    };
+  };
+  const handles = (markers ?? []).filter((m) => m.draggable && m.id && m.t >= t0 && m.t <= t1);
+
   const labels = (markers ?? []).filter((m) => m.label && m.t >= t0 && m.t <= t1);
   return (
     <div
@@ -143,6 +192,16 @@ export function Waveform(props: WaveformProps) {
       data-testid="waveform"
     >
       <canvas ref={canvas} role="img" aria-label={label} style={{ width: "100%", height }} />
+      {handles.map((m) => (
+        <div
+          key={m.id}
+          className="marker-handle"
+          data-testid={`handle-${m.id}`}
+          title="Drag to move (hold Shift to move by single beats)"
+          style={{ left: `${((m.t - t0) / (t1 - t0)) * 100}%`, "--handle-color": m.color } as CSSProperties}
+          {...handle(m)}
+        />
+      ))}
       {labels.map((m) => (
         <span
           key={`${m.label}-${m.t}`}

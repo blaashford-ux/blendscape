@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EqCurves, PlanDescription } from "../src/api/types";
 import {
+  snapBeat,
+  snapOverlap,
   barOf,
   beatTime,
   confidenceLabel,
@@ -83,7 +85,7 @@ describe("lanes on the mix clock", () => {
   const tr = (i: number, from: string, to: string, start: number, end: number, outBeat: number, inTime: number) => ({
     index: i, from, to, style: "bass_swap" as const, overlap_beats: 16, overlap_s: end - start, out_beat: outBeat,
     in_beat: 0, out_time_s: start, in_time_s: inTime, start_s: start, end_s: end, unplayed_tail_s: 0, tempo_gap: 0,
-    score: 0.8, note: "", warnings: [], alternatives: [],
+    score: 0.8, note: "", warnings: [], alternatives: [], edited: false,
     eq: { bass_swap_center: 0.5, bass_swap_beats: 4, mid_in: [0.15, 0.6], mid_out: [0.45, 0.85], hi_in: [0, 0.4], hi_out: [0.6, 1] } as EqCurves,
   });
   const plan: PlanDescription = {
@@ -168,5 +170,22 @@ describe("small helpers", () => {
     expect(confidenceLabel(0.95)).toBe("sure");
     expect(confidenceLabel(0.6)).toBe("likely");
     expect(confidenceLabel(0.3)).toBe("unsure");
+  });
+});
+
+describe("snapBeat / snapOverlap", () => {
+  const g = { offset_s: 0.5, bpm: 120, downbeat: 1 }; // beats every 0.5 s; bar lines on beats 1, 5, 9, ...
+  it("snaps to bar lines (offset by the downbeat) or to single beats", () => {
+    expect(snapBeat(g, 0.5 + 9 * 0.5 + 0.2, 4)).toBe(9);
+    expect(snapBeat(g, 0.5 + 6.9 * 0.5, 4)).toBe(5);
+    expect(snapBeat(g, 0.5 + 6.9 * 0.5, 1)).toBe(7);
+    expect(snapBeat(g, -5, 4)).toBe(1);
+    expect(snapBeat(g, -5, 1)).toBe(0);
+    expect(snapBeat(g, -5, 4)).toBe(1); // the first bar line, not a negative one
+  });
+  it("sets the overlap in whole bars, never less than one", () => {
+    expect(snapOverlap(g, 9, 0.5 + 25 * 0.5, 4)).toBe(16);
+    expect(snapOverlap(g, 9, 0.5 + 10 * 0.5, 4)).toBe(4);
+    expect(snapOverlap(g, 9, 0.5 + 21 * 0.5, 1)).toBe(12);
   });
 });

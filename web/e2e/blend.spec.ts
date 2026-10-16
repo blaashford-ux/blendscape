@@ -57,6 +57,37 @@ test("a whole session: upload, analyse, edit a transition, preview, reorder, ren
   await expect(page.getByRole("region", { name: "Transition 1" })).toBeVisible();
   await shot(page, "02-planned");
 
+  // drag the markers with a real mouse: they snap to bars, mark the transition as edited, and Reset undoes it all
+  const original = {
+    out: secs((await page.getByTestId("out-time").textContent())!),
+    inn: secs((await page.getByTestId("in-time").textContent())!),
+    overlap: await page.getByTestId("overlap-beats").textContent(),
+  };
+  const dragHandle = async (id: string, dx: number) => {
+    const handle = page.getByTestId(`handle-${id}`).first();
+    await handle.scrollIntoViewIfNeeded();
+    const box = (await handle.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 5 });
+    await page.mouse.move(x + dx, y, { steps: 5 });
+    await page.mouse.up();
+  };
+  await dragHandle("out", -150);
+  await expect(page.getByText("edited", { exact: true })).toBeVisible();
+  await expect.poll(async () => secs((await page.getByTestId("out-time").textContent())!)).toBeLessThan(original.out - 2);
+  await dragHandle("in", 100);
+  await expect.poll(async () => secs((await page.getByTestId("in-time").textContent())!)).toBeGreaterThan(original.inn + 1);
+  await dragHandle("end-a", -80);
+  await expect.poll(async () => await page.getByTestId("overlap-beats").textContent()).not.toBe(original.overlap);
+  await shot(page, "02b-dragged");
+  await page.getByRole("button", { name: /Reset to the planner's choice/ }).click();
+  await expect(page.getByText("edited", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("overlap-beats")).toHaveText(original.overlap!);
+  await expect.poll(async () => secs((await page.getByTestId("out-time").textContent())!)).toBeCloseTo(original.out, 1);
+
   // nudging "leaves at" by a bar moves it by exactly one bar (4 beats at 124 BPM = 1.935 s)
   const leaves = page.getByTestId("out-time");
   const before = secs((await leaves.textContent())!);
