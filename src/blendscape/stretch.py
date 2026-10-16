@@ -53,7 +53,10 @@ _OPTS = 0x20000000 | 0x100000 | 0x400 | 0x10000000
 
 
 def _cli_path() -> str | None:
-    return os.environ.get("RUBBERBAND") or shutil.which("rubberband") or shutil.which("rubberband.exe")
+    env = os.environ.get("RUBBERBAND")
+    if env and os.path.isfile(env):  # a RUBBERBAND that points nowhere must not hide one on PATH
+        return env
+    return shutil.which("rubberband") or shutil.which("rubberband.exe")
 
 
 def backend() -> str:
