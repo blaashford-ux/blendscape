@@ -108,7 +108,7 @@ Status: **0 spike, 1 core engine and CLI, 2 smart mix points, 3 API, 4 GUI done*
 3. **API. Done.** Projects, jobs, plan CRUD, preview/final render (`src/blendscape/server/`, `docs/API.md`).
 4. **GUI. Done.** React + TypeScript (`web/`): track list with reordering and bar-line check, mix timeline, transition editor with waveforms, beat grid and sections, EQ timing, alternatives, preview, render/download. 123 unit/component tests and 6 real-browser tests.
 5. **Hardening.** Low-confidence handling, big-BPM-gap handling, loudness normalisation,
-   performance (long tracks, caching), packaging.
+   performance (long tracks, caching), ~~packaging~~ (done: UI bundled in the wheel, Windows kit, `doctor`, release workflow).
 
 ### Milestone 2 notes
 

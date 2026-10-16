@@ -1,0 +1,5 @@
+The tools folder holds the Rubber Band command-line program, used to time-stretch audio.
+Rubber Band is copyright Particular Programs Ltd (trading as Breakfast Quay) and is distributed here under the
+GNU General Public License, version 2 or (at your option) any later version.
+Source code and licence: https://breakfastquay.com/rubberband/  and  https://github.com/breakfastquay/rubberband
+Blendscape runs it as a separate program; it is not linked into Blendscape.

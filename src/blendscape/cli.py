@@ -141,14 +141,19 @@ def cmd_serve(args) -> int:
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print(f"warning: serving on {args.host}: anyone who can reach this port can read files from this computer "
               f"through the API. Only do this on a network you trust.", file=sys.stderr)
+    from . import config as appconfig
+    from .server.store import default_home
+
+    home = args.home or default_home()
     if args.rubberband:
         if not os.path.isfile(args.rubberband):
             print(f"error: --rubberband: no such file: {args.rubberband}", file=sys.stderr)
             return 2
-        os.environ["RUBBERBAND"] = args.rubberband
+        appconfig.save(home, rubberband=os.path.abspath(args.rubberband))  # remembered for next time
+        print(f"remembered Rubber Band at {os.path.abspath(args.rubberband)}", file=sys.stderr)
     elif os.environ.get("RUBBERBAND") and not os.path.isfile(os.environ["RUBBERBAND"]):
         print(f"warning: RUBBERBAND is set to {os.environ['RUBBERBAND']!r}, which is not a file", file=sys.stderr)
-    app = create_app(home=args.home)
+    app = create_app(home=home)
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}"
     built = any(getattr(r, "name", "") == "web" for r in app.routes)
     web = "web UI at /" if built else "web UI not built: see README"
@@ -167,6 +172,59 @@ def cmd_serve(args) -> int:
         threading.Timer(1.0, webbrowser.open, args=[url]).start()
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
+
+
+def cmd_doctor(args) -> int:
+    """Check the install and say what is missing; exit 1 if previews and renders can't work."""
+    import importlib.metadata as md
+    import platform
+
+    from . import config as appconfig
+    from . import stretch
+    from .server.app import PACKAGED_UI
+    from .server.store import default_home
+
+    home = args.home or default_home()
+    stretch.set_default_path(appconfig.load(home)["rubberband"])
+    ok = True
+
+    def line(good: bool | None, what: str, detail: str = "") -> None:
+        mark = {True: "ok     ", False: "MISSING", None: "info   "}[good]
+        print(f"  [{mark}] {what}" + (f": {detail}" if detail else ""))
+
+    print(f"Blendscape {__version__} on Python {platform.python_version()} ({platform.system()} {platform.machine()})")
+    for pkg in ("numpy", "scipy", "soundfile", "librosa", "numba"):
+        try:
+            line(True, pkg, md.version(pkg))
+        except md.PackageNotFoundError:
+            line(False, pkg, "not installed (pip install blendscape)")
+            ok = False
+    try:
+        import fastapi  # noqa: F401
+        import uvicorn  # noqa: F401
+
+        line(True, "web server", "fastapi + uvicorn")
+    except ImportError as e:
+        line(False, "web server", f"{e.name} missing: pip install \"blendscape[api]\"")
+    if PACKAGED_UI.is_dir():
+        line(True, "web UI", "built into this install")
+    else:
+        built = any(p.joinpath("index.html").is_file() for p in [Path(__file__).resolve().parents[2] / "web" / "dist"])
+        line(built, "web UI", "from a source checkout's web/dist" if built else "not built (cd web; npm run build)")
+    exe = stretch._cli_path()
+    if exe:
+        line(True, "Rubber Band", f"{exe} ({stretch.cli_version() or 'version unknown'})")
+    elif stretch.available():
+        line(True, "Rubber Band", "librubberband library")
+    else:
+        line(False, "Rubber Band", "not found, so previews and renders won't work. Put rubberband on PATH, set "
+                                   "RUBBERBAND, or run: blendscape serve --rubberband PATH\\to\\rubberband.exe")
+        ok = False
+    cfg = appconfig.load(home)
+    line(None, "data folder", str(home))
+    line(None, "copy mixes to", cfg["export_dir"] or "(not set: mixes stay in the data folder; set it in the web UI)")
+    print("Everything needed is in place." if ok else "Something is missing: see above.")
+    return 0 if ok else 1
 
 
 def cmd_plan(args) -> int:
@@ -297,8 +355,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--home", help="where projects are stored (default: ~/.local/share/blendscape or $BLENDSCAPE_HOME)")
     p.add_argument("--open", action="store_true", help="open the web UI in your browser")
-    p.add_argument("--rubberband", metavar="PATH", help="the rubberband executable (default: $RUBBERBAND, then PATH)")
+    p.add_argument("--rubberband", metavar="PATH",
+                   help="the rubberband executable; remembered for next time (default: $RUBBERBAND, then PATH)")
     p.set_defaults(fn=cmd_serve)
+
+    p = sub.add_parser("doctor", help="check the install: packages, web UI, Rubber Band")
+    p.add_argument("--home", help="data folder to check (default as for serve)")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("plan", help="analyse files and write an editable mix_plan.json")
     _add_plan_opts(p)

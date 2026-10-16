@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import json
+import shutil
 
 import pytest
 import soundfile as sf
@@ -532,3 +533,88 @@ def test_web_ui_assets_have_correct_mime(tmp_path, monkeypatch):
     r = TestClient(app).get("/assets/a.js")
     assert r.headers["content-type"].startswith("text/javascript")
     assert r.headers["cache-control"] == "no-cache"
+
+
+# ---------- per-computer settings: Rubber Band location and a folder for copies of finished mixes ----------
+def test_config_starts_empty_and_validates(client):
+    c = client.get("/api/config").json()
+    assert c["rubberband"] is None and c["export_dir"] is None
+    r = client.put("/api/config", json={"rubberband": "/no/such/file"})
+    assert r.status_code == 422 and "no such file" in r.json()["detail"]
+
+
+def test_rubberband_path_is_saved_applied_and_cleared(client, tmp_path, monkeypatch):
+    from blendscape import stretch
+
+    monkeypatch.setattr(stretch, "_lib", None)
+    monkeypatch.delenv("RUBBERBAND", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "nothing"))
+    assert client.get("/api/health").json()["stretch_backend"] is None
+    exe = tmp_path / "bin" / "rubberband"
+    exe.parent.mkdir()
+    exe.write_text("")
+    # a folder that holds the program is accepted too
+    c = client.put("/api/config", json={"rubberband": str(exe.parent)}).json()
+    assert c["rubberband"] == str(exe) and c["rubberband_in_use"] == str(exe)
+    assert client.get("/api/health").json()["stretch_backend"] == "cli"  # no restart needed
+    c = client.put("/api/config", json={"rubberband": ""}).json()
+    assert c["rubberband"] is None
+    assert client.get("/api/health").json()["stretch_backend"] is None
+    stretch.set_default_path(None)
+
+
+def test_export_folder_is_created_and_other_keys_are_left_alone(client, tmp_path):
+    out = tmp_path / "my" / "mixes"
+    c = client.put("/api/config", json={"export_dir": str(out)}).json()
+    assert out.is_dir() and c["export_dir"] == str(out)
+    c = client.put("/api/config", json={"rubberband": None}).json()  # only the key you send changes
+    assert c["export_dir"] == str(out)
+    f = tmp_path / "afile"
+    f.write_text("x")
+    assert client.put("/api/config", json={"export_dir": str(f / "sub")}).status_code == 422
+
+
+def test_config_lives_in_the_data_home(client, api_home, tmp_path):
+    client.put("/api/config", json={"export_dir": str(tmp_path / "x")})
+    import json
+
+    assert json.loads((api_home / "config.json").read_text())["export_dir"] == str(tmp_path / "x")
+
+
+def test_the_ui_shipped_in_the_package_is_used_when_there_is_no_source_build(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from blendscape.server import app as appmod
+
+    packaged = tmp_path / "webui"
+    packaged.mkdir()
+    (packaged / "index.html").write_text("<html>packaged</html>")
+    monkeypatch.setattr(appmod, "PACKAGED_UI", packaged)
+    monkeypatch.setattr(appmod, "SOURCE_UI", tmp_path / "no-source-build")
+    monkeypatch.delenv("BLENDSCAPE_WEB", raising=False)
+    c = TestClient(appmod.create_app(home=tmp_path / "h"))
+    assert "packaged" in c.get("/").text
+    assert c.get("/api/config").json()["ui_bundled"] is True
+    # ...but a fresh build in a source checkout wins over a stale bundled copy
+    src = tmp_path / "dist"
+    src.mkdir()
+    (src / "index.html").write_text("<html>fresh build</html>")
+    monkeypatch.setattr(appmod, "SOURCE_UI", src)
+    assert "fresh build" in TestClient(appmod.create_app(home=tmp_path / "h2")).get("/").text
+
+
+@pytest.mark.slow
+@needs_rubberband
+def test_render_copies_the_finished_mix_to_the_export_folder(client, planned, tmp_path):
+    out = tmp_path / "copies"
+    client.put("/api/config", json={"export_dir": str(out)})
+    job = client.post(f"/api/projects/{planned['id']}/render", json={}).json()
+    res = wait_job(client, job["id"])["result"]
+    assert (out / res["name"]).is_file() and res["copied_to"] == str(out / res["name"])
+    # and a folder that stops working loses nothing
+    shutil.rmtree(out)
+    (tmp_path / "copies").write_text("now a file")
+    job = client.post(f"/api/projects/{planned['id']}/render", json={}).json()
+    res = wait_job(client, job["id"])["result"]
+    mixes = client.get(f"/api/projects/{planned['id']}").json()["mixes"]
+    assert "copy_error" in res and res["name"] in [m["name"] for m in mixes]

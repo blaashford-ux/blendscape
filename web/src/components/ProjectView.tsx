@@ -7,6 +7,7 @@ import { usePlayer } from "../state/usePlayer";
 import { useProject } from "../state/useProject";
 import { JobBar } from "./JobBar";
 import { MixTimeline } from "./MixTimeline";
+import { MachineSettings } from "./MachineSettings";
 import { SettingsPanel } from "./SettingsPanel";
 import { TrackList } from "./TrackList";
 import { TransitionEditor } from "./TransitionEditor";
@@ -19,12 +20,14 @@ export function ProjectView({ id }: { id: string }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [stretch, setStretch] = useState<string | null | undefined>(undefined);
   const [draftName, setDraftName] = useState<string | null>(null); // only while you are typing
 
-  useEffect(() => {
+  const checkStretch = useCallback(() => {
     api.health().then((h) => setStretch(h.stretch_backend)).catch(() => setStretch(undefined));
   }, []);
+  useEffect(checkStretch, [checkStretch]);
 
   const nTransitions = project?.plan?.transitions.length ?? 0;
   useEffect(() => {
@@ -53,11 +56,14 @@ export function ProjectView({ id }: { id: string }) {
 
   const render = async () => {
     setNotice(null);
+    setInfo(null);
     const done = await work.start("Rendering the mix", () => api.render(id));
     await refresh();
     if (done?.result) {
       const r = done.result as unknown as RenderResult;
       if (r.clipped) setNotice("The mix clipped: turn the limiter on or lower the ceiling.");
+      else if (r.copy_error) setNotice(r.copy_error);
+      if (r.copied_to) setInfo(`Saved a copy to ${r.copied_to}`);
     }
   };
 
@@ -129,7 +135,10 @@ export function ProjectView({ id }: { id: string }) {
 
       {stretch === null && (
         <div className="banner warn-banner" role="alert">
-          The Rubber Band program isn't installed, so previews and renders are unavailable. Install it and restart the server (see the README).
+          <span>The Rubber Band program wasn't found, so previews and renders are unavailable.</span>
+          <button className="primary" onClick={() => setSettingsOpen(true)}>
+            Tell me where it is
+          </button>
         </div>
       )}
       {project.plan_stale && (
@@ -145,13 +154,23 @@ export function ProjectView({ id }: { id: string }) {
           {w}
         </div>
       ))}
+      {info && (
+        <div className="banner" role="status">
+          {info}
+        </div>
+      )}
       {notice && (
         <div className="banner warn-banner" role="alert">
           {notice}
         </div>
       )}
 
-      {settingsOpen && <SettingsPanel project={project} onProject={apply} disabled={busy} />}
+      {settingsOpen && (
+        <>
+          <SettingsPanel project={project} onProject={apply} disabled={busy} />
+          <MachineSettings onChanged={checkStretch} />
+        </>
+      )}
 
       <div className="workspace">
         <aside className="sidebar">

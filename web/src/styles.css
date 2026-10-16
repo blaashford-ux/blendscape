@@ -202,3 +202,8 @@ label.radio { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .reset-btn { margin-left: auto; }
 .chip.edited { background: #5a4a1a; color: #ffd98a; }
 .drag-hint { margin: -2px 0 8px; min-height: 1.4em; }
+
+.machine-settings h2 { font-size: 15px; margin-bottom: 8px; }
+.machine-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 4px; }
+.machine-row .field.wide { flex: 1; }
+.machine-row .field.wide input { width: 100%; }

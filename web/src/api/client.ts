@@ -1,4 +1,5 @@
 import type {
+  AppConfig,
   JobInfo,
   Peaks,
   Project,
@@ -51,6 +52,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 const p = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
 
 export const api = {
+  config: () => request<AppConfig>("GET", "/api/config"),
+  setConfig: (c: { rubberband?: string | null; export_dir?: string | null }) => request<AppConfig>("PUT", "/api/config", c),
   health: () => request<{ ok: boolean; version: string; stretch_backend: string | null; home: string }>("GET", "/api/health"),
 
   listProjects: () => request<ProjectSummary[]>("GET", "/api/projects"),

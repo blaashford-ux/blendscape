@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -21,6 +22,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
+from .. import config as appconfig
+from .. import stretch as stretch_mod
 from ..analysis import AnalysisError, TrackAnalysis, analyze, with_downbeat
 from ..audio import AudioError, load_audio, write_audio
 from ..check import click_check
@@ -34,6 +37,7 @@ from .schemas import (
     AddTrackPath,
     AlternativeIn,
     AnalyzeIn,
+    ConfigIn,
     DownbeatIn,
     OrderIn,
     PreviewIn,
@@ -227,6 +231,10 @@ def _track_entry(path: Path, name: str, source: str, size: int) -> dict:
 # ======================================================================================================
 # the app
 # ======================================================================================================
+# the built web UI, copied in here when a release is built (scripts/bundle_ui.py)
+PACKAGED_UI = Path(__file__).resolve().parents[1] / "webui"
+SOURCE_UI = Path(__file__).resolve().parents[3] / "web" / "dist"  # only exists in a source checkout
+
 # Windows takes MIME types from the registry, where .js is often text/plain, and browsers refuse to run module
 # scripts served that way (blank page). So the UI's file types are pinned here rather than looked up.
 _UI_TYPES = {".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
@@ -247,6 +255,7 @@ class _UIFiles(StaticFiles):
 
 def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path | str | None = None) -> FastAPI:
     store = ProjectStore(home)
+    stretch_mod.set_default_path(appconfig.load(store.home)["rubberband"])
     jobs = JobManager(workers)
     analysis_cache = store.home / "analysis-cache"
 
@@ -295,6 +304,45 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
         except StretchError:
             stretch = None
         return {"ok": True, "version": __version__, "stretch_backend": stretch, "home": str(store.home)}
+
+    # ---------- per-computer settings ----------
+    def _config_view() -> dict:
+        cfg = appconfig.load(store.home)
+        return {"rubberband": cfg["rubberband"], "rubberband_in_use": stretch_mod._cli_path(),
+                "rubberband_version": stretch_mod.cli_version(), "export_dir": cfg["export_dir"],
+                "ui_bundled": PACKAGED_UI.is_dir()}
+
+    @app.get("/api/config", tags=["system"])
+    def get_config():
+        """Where Rubber Band is and where finished mixes are copied (both optional, per computer)."""
+        return _config_view()
+
+    @app.put("/api/config", tags=["system"])
+    def put_config(body: ConfigIn):
+        changes: dict[str, str | None] = {}
+        if "rubberband" in body.model_fields_set:
+            rb = (body.rubberband or "").strip().strip('"')
+            if rb:
+                path = Path(rb).expanduser()
+                if path.is_dir():  # be forgiving: a folder that holds it
+                    path = next((c for c in (path / "rubberband.exe", path / "rubberband") if c.is_file()), path)
+                if not path.is_file():
+                    raise HTTPException(422, f"no such file: {rb}")
+                rb = str(path)
+            changes["rubberband"] = rb or None
+        if "export_dir" in body.model_fields_set:
+            ed = (body.export_dir or "").strip().strip('"')
+            if ed:
+                d = Path(ed).expanduser()
+                try:
+                    d.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    raise HTTPException(422, f"can't use that folder: {e}") from e
+                ed = str(d)
+            changes["export_dir"] = ed or None
+        cfg = appconfig.save(store.home, **changes)
+        stretch_mod.set_default_path(cfg["rubberband"])
+        return _config_view()
 
     # ---------- projects ----------
     @app.get("/api/projects", tags=["projects"])
@@ -607,10 +655,20 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
             mix, report = render(plan, progress=progress)
             ctx.report("writing the file", 0.95)
             fname = f"{body.name or safe_filename(proj['name'])}-{time.strftime('%Y%m%d-%H%M%S')}.wav"
-            write_audio(store.dir(pid) / "mixes" / fname, mix, plan.sample_rate, plan.bit_depth)
-            return {"url": f"/api/projects/{pid}/mixes/{fname}", "name": fname, "duration_s": report.duration_s,
-                    "peak_db": report.peak_after_db, "max_reduction_db": report.max_reduction_db,
-                    "limited_fraction": report.limited_fraction, "clipped": report.clipped}
+            out = store.dir(pid) / "mixes" / fname
+            write_audio(out, mix, plan.sample_rate, plan.bit_depth)
+            result = {"url": f"/api/projects/{pid}/mixes/{fname}", "name": fname, "duration_s": report.duration_s,
+                      "peak_db": report.peak_after_db, "max_reduction_db": report.max_reduction_db,
+                      "limited_fraction": report.limited_fraction, "clipped": report.clipped}
+            export_dir = appconfig.load(store.home)["export_dir"]
+            if export_dir:  # a failed copy must not lose the render
+                try:
+                    Path(export_dir).mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(out, Path(export_dir) / fname)
+                    result["copied_to"] = str(Path(export_dir) / fname)
+                except OSError as e:
+                    result["copy_error"] = f"couldn't copy to {export_dir}: {e}"
+            return result
 
         return jobs.submit("render", work, pid).to_dict()
 
@@ -672,7 +730,9 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # ---------- web UI (built in milestone 4) ----------
-    web = Path(web_dir or os.environ.get("BLENDSCAPE_WEB") or Path(__file__).resolve().parents[3] / "web" / "dist")
+    # explicit argument, then $BLENDSCAPE_WEB, then a source checkout's own build (so rebuilding while developing
+    # wins over a stale bundled copy), then the UI shipped inside the installed package
+    web = Path(web_dir or os.environ.get("BLENDSCAPE_WEB") or (SOURCE_UI if SOURCE_UI.is_dir() else PACKAGED_UI))
     if web.is_dir():
         app.mount("/", _UIFiles(directory=web, html=True), name="web")
     else:

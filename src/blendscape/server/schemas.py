@@ -112,3 +112,9 @@ class RenderIn(BaseModel):
         if not cleaned:
             raise ValueError("name has no usable characters")
         return cleaned
+
+
+class ConfigIn(BaseModel):
+    """Per-computer settings. Send only the keys to change; null or "" clears one."""
+    rubberband: str | None = Field(None, max_length=1000)
+    export_dir: str | None = Field(None, max_length=1000)

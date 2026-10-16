@@ -193,6 +193,16 @@ export interface RenderResult {
   max_reduction_db: number;
   limited_fraction: number;
   clipped: boolean;
+  copied_to?: string;
+  copy_error?: string;
+}
+
+export interface AppConfig {
+  rubberband: string | null; // what you saved
+  rubberband_in_use: string | null; // what is actually found
+  rubberband_version: string | null;
+  export_dir: string | null;
+  ui_bundled: boolean;
 }
 
 export interface TransitionPatch {

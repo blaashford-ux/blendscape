@@ -52,11 +52,34 @@ _BLOCK = 8192
 _OPTS = 0x20000000 | 0x100000 | 0x400 | 0x10000000
 
 
+_configured: str | None = None
+
+
+def set_default_path(path: str | None) -> None:
+    """The remembered location of the executable (from the config file); used after $RUBBERBAND, before PATH."""
+    global _configured
+    _configured = path or None
+
+
 def _cli_path() -> str | None:
-    env = os.environ.get("RUBBERBAND")
-    if env and os.path.isfile(env):  # a RUBBERBAND that points nowhere must not hide one on PATH
-        return env
+    for cand in (os.environ.get("RUBBERBAND"), _configured):
+        if cand and os.path.isfile(cand):  # one that points nowhere must not hide another that works
+            return cand
     return shutil.which("rubberband") or shutil.which("rubberband.exe")
+
+
+def cli_version() -> str | None:
+    """What `rubberband --version` says, for diagnostics; None if there is no executable or it won't run."""
+    import subprocess
+
+    exe = _cli_path()
+    if not exe:
+        return None
+    try:
+        r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout or r.stderr).strip().splitlines()[0] if (r.stdout or r.stderr).strip() else "unknown version"
 
 
 def backend() -> str:

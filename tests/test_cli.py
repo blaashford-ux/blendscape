@@ -307,7 +307,6 @@ def test_serve_says_whether_rubber_band_was_found_and_takes_a_path(tmp_path, mon
     exe.write_text("")
     assert main(["serve", "--home", home, "--rubberband", str(exe)]) == 0
     assert "Rubber Band: found (cli)" in capsys.readouterr().err
-    monkeypatch.delenv("RUBBERBAND")
 
 
 def test_a_rubberband_variable_pointing_nowhere_does_not_hide_the_one_on_path(tmp_path, monkeypatch):
@@ -319,3 +318,46 @@ def test_a_rubberband_variable_pointing_nowhere_does_not_hide_the_one_on_path(tm
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv("RUBBERBAND", str(tmp_path / "gone"))
     assert stretch._cli_path() == str(exe)
+
+
+def test_doctor_reports_what_is_there_and_what_is_missing(tmp_path, monkeypatch, capsys):
+    from blendscape import stretch
+
+    monkeypatch.setattr(stretch, "_lib", None)
+    monkeypatch.delenv("RUBBERBAND", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    home = str(tmp_path / "h")
+    assert main(["doctor", "--home", home]) == 1
+    out = capsys.readouterr().out
+    assert "numpy" in out and "[MISSING] Rubber Band" in out and "Something is missing" in out
+
+    exe = tmp_path / "rubberband"
+    exe.write_text("#!/bin/sh\necho 'Rubber Band v9.9'\n")
+    exe.chmod(0o755)
+    from blendscape import config
+
+    config.save(home, rubberband=str(exe), export_dir=str(tmp_path / "out"))
+    assert main(["doctor", "--home", home]) == 0
+    out = capsys.readouterr().out
+    assert "[ok     ] Rubber Band" in out and "v9.9" in out and str(tmp_path / "out") in out
+    stretch.set_default_path(None)
+
+
+def test_serve_remembers_the_rubberband_path(tmp_path, monkeypatch, capsys):
+    import uvicorn
+
+    from blendscape import config, stretch
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    monkeypatch.setattr(stretch, "_lib", None)
+    monkeypatch.delenv("RUBBERBAND", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    exe = tmp_path / "rubberband.exe"
+    exe.write_text("")
+    home = str(tmp_path / "h")
+    assert main(["serve", "--home", home, "--rubberband", str(exe)]) == 0
+    assert config.load(home)["rubberband"] == str(exe)
+    stretch.set_default_path(None)
+    assert main(["serve", "--home", home]) == 0  # no flag this time: found from the config file
+    assert "Rubber Band: found" in capsys.readouterr().err
+    stretch.set_default_path(None)
