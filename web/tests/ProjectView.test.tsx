@@ -11,7 +11,7 @@ import { peaks, project, track } from "./fixtures";
 
 vi.mock("../src/api/client", async (orig) => {
   const real = await orig<typeof import("../src/api/client")>();
-  const names = ["health", "getProject", "renameProject", "waveform", "analyze", "plan", "render", "preview", "addTrackByPath", "patchTransition", "reorder", "deleteTrack", "setDownbeat", "cancelJob", "getJob"] as const;
+  const names = ["health", "getProject", "renameProject", "waveform", "analyze", "plan", "render", "preview", "addTrackByPath", "patchTransition", "reorder", "deleteTrack", "setDownbeat", "cancelJob", "getJob", "config", "setConfig"] as const;
   return { ...real, api: { ...real.api, ...Object.fromEntries(names.map((n) => [n, vi.fn()])) } };
 });
 
@@ -102,8 +102,21 @@ describe("ProjectView: out-of-date plans and missing programs", () => {
   it("explains that rendering is unavailable without Rubber Band", async () => {
     mocked("health").mockResolvedValue({ ok: true, version: "0.1.0", stretch_backend: null, home: "/h" });
     mount();
-    expect(await screen.findByText(/Rubber Band program isn't installed/)).toBeInTheDocument();
+    expect(await screen.findByText(/Rubber Band program wasn't found/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Render the mix" })).toBeDisabled();
+  });
+
+  it("lets you say where Rubber Band is, and then allows rendering without a restart", async () => {
+    mocked("health").mockResolvedValueOnce({ ok: true, version: "0.1.0", stretch_backend: null, home: "/h" });
+    mocked("config").mockResolvedValue({ rubberband: null, rubberband_in_use: null, rubberband_version: null, export_dir: null, ui_bundled: true });
+    mocked("setConfig").mockResolvedValue({ rubberband: "/rb", rubberband_in_use: "/rb", rubberband_version: "3.3.0", export_dir: null, ui_bundled: true });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Tell me where it is" }));
+    mocked("health").mockResolvedValue({ ok: true, version: "0.1.0", stretch_backend: "cli", home: "/h" });
+    await userEvent.type(await screen.findByLabelText("Rubber Band program"), "/rb");
+    await userEvent.click(screen.getAllByRole("button", { name: "Save" })[0]);
+    await waitFor(() => expect(screen.queryByText(/wasn't found/)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Render the mix" })).toBeEnabled();
   });
 
   it("reports a project that can't be opened", async () => {

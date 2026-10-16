@@ -98,3 +98,12 @@ def planned(client, project):
     j = client.post(f"/api/projects/{pid}/analyze").json()
     assert wait_job(client, j["id"])["state"] == "done"
     return client.get(f"/api/projects/{pid}").json()
+
+
+@pytest.fixture(autouse=True)
+def _forget_configured_rubberband():
+    """The remembered Rubber Band path is module state; one test's must not leak into the next."""
+    yield
+    from blendscape import stretch
+
+    stretch.set_default_path(None)

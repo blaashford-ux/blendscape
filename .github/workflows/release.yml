@@ -1,0 +1,193 @@
+name: Release
+
+# Publishes a GitHub release with:
+#   - the Python wheel (the web UI is built into it, so no Node is needed to install)
+#   - a Windows zip: the wheel, one-click Install/Start scripts and, if it can be fetched, Rubber Band
+#
+# Start it by pushing a tag (git tag v0.1.0 && git push origin v0.1.0) or from the Actions tab ("Run workflow").
+# The tag must match `version` in pyproject.toml.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.1.0 (created if it does not exist)"
+        required: true
+      prerelease:
+        description: "Mark as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: The tag matches the package version
+        run: |
+          v=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "v$v" != "$TAG" ]; then echo "::error::tag $TAG does not match pyproject version $v"; exit 1; fi
+      - name: Build the web UI and bundle it into the package
+        run: |
+          npm ci && npm run build
+          cd .. && python scripts/bundle_ui.py
+        working-directory: web
+      - name: Build the wheel
+        run: pip install build && python -m build --wheel
+      - name: The wheel carries the UI
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          w = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(w).namelist()
+          assert "blendscape/webui/index.html" in names, names
+          print("ok:", w)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+
+  windows:
+    needs: wheel
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: kit/Blendscape/wheels
+      - name: Assemble the folder
+        shell: pwsh
+        run: |
+          $kit = "kit/Blendscape"
+          Copy-Item packaging/windows/* $kit -Recurse
+          Copy-Item LICENSE.txt $kit
+          # Rubber Band's official Windows build. Best effort: without it the zip still works (the app asks
+          # where the program is), but say so loudly.
+          $urls = @(
+            "https://breakfastquay.com/files/releases/rubberband-4.0.0-gpl-executable-windows.zip",
+            "https://breakfastquay.com/files/releases/rubberband-3.3.0-gpl-executable-windows.zip"
+          )
+          $got = $false
+          foreach ($u in $urls) {
+            try {
+              Invoke-WebRequest -Uri $u -OutFile rb.zip -UseBasicParsing
+              Expand-Archive rb.zip -DestinationPath rb -Force
+              $exe = Get-ChildItem rb -Recurse -Filter "rubberband.exe" | Select-Object -First 1
+              if ($exe) {
+                New-Item -ItemType Directory "$kit/tools" -Force | Out-Null
+                Copy-Item "$($exe.DirectoryName)/*" "$kit/tools" -Recurse
+                Copy-Item "$kit/RUBBERBAND-NOTICE.txt" "$kit/tools/NOTICE.txt"
+                Write-Host "Rubber Band from $u"
+                $got = $true
+                break
+              }
+            } catch { Write-Host "could not use ${u}: $_" }
+          }
+          if (-not $got) { Write-Host "::warning::Rubber Band could not be fetched: the Windows zip has no tools folder" }
+          Remove-Item "$kit/RUBBERBAND-NOTICE.txt" -ErrorAction SilentlyContinue
+          if ($got) { "bundled" | Out-File rubberband-state.txt } else { "missing" | Out-File rubberband-state.txt }
+      - name: Smoke test the kit as a user would use it
+        shell: pwsh
+        run: |
+          Set-Location kit/Blendscape
+          ./Install.ps1 -NoPause
+          if ($LASTEXITCODE -ne 0) { throw "Install.ps1 failed" }
+          $env:BLENDSCAPE_HOME = "$env:RUNNER_TEMP/bs-home"
+          if (Test-Path tools/rubberband.exe) { $env:RUBBERBAND = (Resolve-Path tools/rubberband.exe).Path }
+          $p = Start-Process -FilePath .venv/Scripts/blendscape.exe -ArgumentList "serve","--port","8765" -PassThru -RedirectStandardError serve.err -RedirectStandardOutput serve.out
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { $h = Invoke-RestMethod http://127.0.0.1:8765/api/health; $ok = $true; break } catch { Start-Sleep 1 }
+            }
+            if (-not $ok) { Get-Content serve.err, serve.out; throw "server did not start" }
+            $page = Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing
+            $js = [regex]::Match($page.Content, '/assets/[^"]+\.js').Value
+            if (-not $js) { throw "the page does not reference a script: is the UI bundled?" }
+            $type = (Invoke-WebRequest "http://127.0.0.1:8765$js" -UseBasicParsing).Headers["Content-Type"]
+            Write-Host "script content-type: $type"
+            if ($type -notmatch "javascript") { throw "script served as $type (blank page on Windows)" }
+            if ((Get-Content ../../rubberband-state.txt).Trim() -eq "bundled" -and -not $h.stretch_backend) {
+              throw "the bundled Rubber Band was not picked up: $($h | ConvertTo-Json)"
+            }
+            Write-Host "health: $($h | ConvertTo-Json -Compress)"
+          } finally { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+      - name: Zip it (without the environment the smoke test created)
+        shell: pwsh
+        run: |
+          Remove-Item kit/Blendscape/.venv -Recurse -Force
+          Remove-Item kit/Blendscape/serve.* -ErrorAction SilentlyContinue
+          Compress-Archive -Path kit/Blendscape -DestinationPath Blendscape-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: Blendscape-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rubberband-state
+          path: rubberband-state.txt
+
+  release:
+    needs: [wheel, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Release notes
+        run: |
+          state=$(cat artifacts/rubberband-state/rubberband-state.txt | tr -d '\r\n ')
+          {
+            echo "## Install"
+            echo
+            echo "**Windows:** download \`Blendscape-windows.zip\`, unzip it, double-click \`Install.bat\` once, then \`Start Blendscape.bat\`."
+            echo "Needs Python 3.10–3.13 (the setup tells you if it is missing)."
+            if [ "$state" = "bundled" ]; then
+              echo "The Rubber Band program is included."
+            else
+              echo "Rubber Band could not be bundled in this build: after starting, open **Settings → This computer** and tell it where \`rubberband.exe\` is."
+            fi
+            echo
+            echo "**Anywhere (Python 3.10–3.13):** \`pip install \"blendscape[api] @ <wheel url>\"\` or download the wheel and \`pip install Blendscape-*.whl[api]\`, then \`blendscape serve --open\`."
+            echo "The web UI is inside the wheel: no Node needed. Check an install with \`blendscape doctor\`."
+            echo
+            echo "## What this release adds"
+            echo
+            echo "- Everything built so far: analysis, smart mix points, limiter, bar-line model, tail-cut limit, web UI with draggable markers, reset."
+            echo "- Web UI built into the package; one-click Windows kit."
+            echo "- \`blendscape doctor\`; Rubber Band location can be set (and is remembered) from the web UI or \`serve --rubberband PATH\`."
+            echo "- Optional folder for a copy of every rendered mix."
+          } > release-notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Blendscape ${{ env.TAG }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          prerelease: ${{ inputs.prerelease || false }}
+          files: |
+            artifacts/wheel/*.whl
+            artifacts/windows-zip/Blendscape-windows.zip

@@ -62,3 +62,27 @@ jobs:
         working-directory: web
         env:
           PYTHON: python
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: web
+      - run: python scripts/bundle_ui.py
+      - run: pip install build && python -m build --wheel
+      - name: The wheel carries the web UI
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          assert "blendscape/webui/index.html" in names, names
+          PY

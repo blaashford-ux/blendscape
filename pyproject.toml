@@ -22,6 +22,9 @@ blendscape = "blendscape.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+blendscape = ["webui/**/*"]  # the built web UI, copied in by scripts/bundle_ui.py when a release is built
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["slow: end-to-end renders (need the rubberband executable)"]

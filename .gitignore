@@ -36,3 +36,8 @@ web/test-results/
 web/playwright-report/
 
 *.egg-info/
+
+# the built web UI copied in for wheels (scripts/bundle_ui.py)
+src/blendscape/webui/
+/dist/
+/build/

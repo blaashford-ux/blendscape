@@ -9,17 +9,33 @@ Project description goes here.
 
 ## Getting started
 
-Needs Python 3.10+ and the [Rubber Band](https://breakfastquay.com/rubberband/) command-line tool (v3+; used for
+### Windows: the one-click kit
+
+1. Download **`Blendscape-windows.zip`** from the [latest release](https://github.com/blaashford-ux/blendscape/releases/latest)
+   and unzip it anywhere.
+2. Double-click **`Install.bat`** once. It needs Python 3.10–3.13 (it tells you how to get it if it's missing).
+3. Double-click **`Start Blendscape.bat`**. A browser tab opens; keep the black window open while you work.
+
+The zip includes the Rubber Band program when the build could fetch it. If previews or renders say Rubber Band wasn't
+found, open **Settings → This computer** in the page and give the location of `rubberband.exe`; it's remembered.
+
+### Any system: pip
+
+Needs Python 3.10–3.13 and the [Rubber Band](https://breakfastquay.com/rubberband/) command-line tool (v3+; used for
 time-stretching). On Linux/macOS install it with your package manager (`apt install rubberband-cli`,
-`brew install rubberband`). On Windows download the executable zip, unzip it, and either put its folder on `PATH` or
-set `RUBBERBAND` to the full path of `rubberband.exe` (or start the web UI with `blendscape serve --rubberband PATH`;
-the variable only lasts for the terminal you set it in, unless you set it as a permanent user variable).
+`brew install rubberband`). On Windows download the executable zip, unzip it, and either put its folder on `PATH`, set
+`RUBBERBAND` to the full path of `rubberband.exe`, or run `blendscape serve --rubberband PATH` once (it remembers).
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate              # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install "blendscape[api] @ https://github.com/blaashford-ux/blendscape/releases/download/v0.1.0/blendscape-0.1.0-py3-none-any.whl"
+blendscape doctor                 # checks the packages, the web UI and Rubber Band, and says what is missing
+blendscape serve --open           # the web UI is inside the package: no Node needed
 ```
+
+From a source checkout (to develop): `pip install -e ".[dev]"`, then build the UI as described under
+[Web UI](#web-ui).
 
 ### Use
 
@@ -114,11 +130,20 @@ Open the page, name a mix, drop in your songs (or add them by file path), and it
   transition before rendering anything.
 - **Tracks**: drag to reorder; each shows how sure the bar line is, with buttons to shift it and a click-track to check
   it by ear.
-- **Render the mix** when you're happy; the WAV is listed under "Rendered mixes" to play or download.
+- **Render the mix** when you're happy; the WAV is listed under "Rendered mixes" to play or download, and
+  (Settings → *This computer*) a copy can also be saved to a folder you choose. Mixes live in
+  `<data folder>/projects/<id>/mixes/` (the data folder is printed at startup; `--home` or `BLENDSCAPE_HOME` moves it).
 
 Everything the UI does goes through the local HTTP API ([docs/API.md](docs/API.md), interactive reference at `/docs`);
 it listens on this computer only unless you say otherwise. For working on the UI itself: `cd web && npm run dev`
 (proxies to a running `blendscape serve`).
+
+### Making a release
+
+Push a tag that matches `version` in `pyproject.toml` (`git tag v0.1.0 && git push origin v0.1.0`) or run the
+**Release** workflow from the Actions tab. It builds the UI into the wheel, assembles and smoke-tests the Windows kit
+on a Windows runner, and publishes both on a GitHub release. Locally: `cd web && npm ci && npm run build`, then
+`python scripts/bundle_ui.py && python -m build --wheel`.
 
 ### Develop
 
