@@ -618,3 +618,31 @@ def test_render_copies_the_finished_mix_to_the_export_folder(client, planned, tm
     res = wait_job(client, job["id"])["result"]
     mixes = client.get(f"/api/projects/{planned['id']}").json()["mixes"]
     assert "copy_error" in res and res["name"] in [m["name"] for m in mixes]
+
+
+def test_shuffle_reorders_and_plans_the_new_neighbours(client, planned):
+    pid = planned["id"]
+    ids = [t["id"] for t in planned["tracks"]]
+    p = client.post(f"/api/projects/{pid}/tracks/shuffle", json={"seed": 3}).json()
+    new = [t["id"] for t in p["tracks"]]
+    assert sorted(new) == sorted(ids) and new != ids
+    assert not p["plan_stale"]  # the transitions were recalculated, not just invalidated
+    assert [(t["from"], t["to"]) for t in p["plan"]["transitions"]] == list(zip(new, new[1:], strict=False))
+    for seed in range(8):  # whatever the randomness does, the order always changes
+        before = [t["id"] for t in client.get(f"/api/projects/{pid}").json()["tracks"]]
+        shuffled = client.post(f"/api/projects/{pid}/tracks/shuffle", json={"seed": seed}).json()
+        assert [t["id"] for t in shuffled["tracks"]] != before
+
+
+def test_shuffle_needs_two_tracks(client):
+    empty = client.post("/api/projects", json={"name": "empty"}).json()
+    r = client.post(f"/api/projects/{empty['id']}/tracks/shuffle")
+    assert r.status_code == 409 and "at least two" in r.json()["detail"]
+
+
+def test_shuffling_tracks_that_are_not_analysed_yet_only_reorders(client, project):
+    pid = project["id"]
+    ids = [t["id"] for t in project["tracks"]]
+    p = client.post(f"/api/projects/{pid}/tracks/shuffle", json={"seed": 1}).json()
+    assert p["plan"] is None and sorted(t["id"] for t in p["tracks"]) == sorted(ids)
+    assert [t["id"] for t in p["tracks"]] != ids

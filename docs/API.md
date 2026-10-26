@@ -44,6 +44,7 @@ POST   /api/projects/{p}/render              {"name": "friday"}                 
 | `POST /api/projects/{p}/tracks/upload` | add a file by multipart upload (field `file`); a copy is kept in the project |
 | `DELETE /api/projects/{p}/tracks/{t}` | remove (deletes an uploaded copy, never a path-added file) |
 | `PUT /api/projects/{p}/tracks/order` | `{"order": [ids...]}`, every id exactly once |
+| `POST /api/projects/{p}/tracks/shuffle` | optional `{"seed": n}`. Random different order; if every track is analysed the transitions are planned again (edits survive only for pairs still adjacent), otherwise the plan is just marked stale. 409 with fewer than two tracks |
 | `PUT /api/projects/{p}/tracks/{t}/downbeat` | `{"downbeat": 0-3}` forces which grid beat starts a bar; `null` goes back to detected |
 | `GET /api/projects/{p}/tracks/{t}/analysis` | full analysis (tempo, grid, per-bar loudness, sections, downbeat posterior) |
 | `GET /api/projects/{p}/tracks/{t}/waveform?points=1500` | `{min[], max[], duration_s}` peaks for drawing a waveform |

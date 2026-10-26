@@ -65,6 +65,7 @@ export const api = {
 
   addTrackByPath: (id: string, path: string) => request<TrackView>("POST", `${p(id)}/tracks`, { path }),
   deleteTrack: (id: string, tid: string) => request<void>("DELETE", `${p(id)}/tracks/${tid}`),
+  shuffle: (id: string) => request<Project>("POST", `${p(id)}/tracks/shuffle`, {}),
   reorder: (id: string, order: string[]) => request<Project>("PUT", `${p(id)}/tracks/order`, { order }),
   setDownbeat: (id: string, tid: string, downbeat: number | null) =>
     request<Project>("PUT", `${p(id)}/tracks/${tid}/downbeat`, { downbeat }),

@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import random
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -46,6 +47,7 @@ from .schemas import (
     RenderIn,
     Settings,
     SettingsPatch,
+    ShuffleIn,
     TransitionPatch,
 )
 from .store import NotFound, ProjectStore, new_id, safe_filename
@@ -438,6 +440,33 @@ def create_app(home: Path | str | None = None, workers: int = 2, web_dir: Path |
             _stale(p)
 
         return project_view(store, store.update(pid, apply))
+
+    @app.post("/api/projects/{pid}/tracks/shuffle", tags=["tracks"])
+    def shuffle(pid: str, body: ShuffleIn | None = None):
+        """Put the tracks in a random (different) order and, if they are all analysed, plan the transitions again.
+        Edits you made to a transition survive only if that same pair of songs is still next to each other."""
+        proj = store.get(pid)
+        ids = [t["id"] for t in proj["tracks"]]
+        if len(ids) < 2:
+            raise Conflict("add at least two tracks to shuffle")
+        rng = random.Random(body.seed if body else None)
+        order = ids[:]
+        for _ in range(50):
+            rng.shuffle(order)
+            if order != ids:
+                break
+        else:  # (only for seeds that keep landing on the same order) rotate: always different with 2+ distinct ids
+            order = ids[1:] + ids[:1]
+
+        def apply(p: dict) -> None:
+            by_id = {t["id"]: t for t in p["tracks"]}
+            p["tracks"] = [by_id[i] for i in order]
+            _stale(p)
+
+        updated = store.update(pid, apply)
+        analysed = all(store.load_analysis(pid, t["id"], store.file_key(t["path"])) is not None
+                       for t in updated["tracks"])
+        return project_view(store, replan(store, pid) if analysed else updated)
 
     @app.put("/api/projects/{pid}/tracks/{tid}/downbeat", tags=["tracks"])
     def set_downbeat(pid: str, tid: str, body: DownbeatIn):

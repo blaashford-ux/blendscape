@@ -129,9 +129,19 @@ test("a whole session: upload, analyse, edit a transition, preview, reorder, ren
   await expect(page.getByRole("button", { name: "Render the mix" })).toBeDisabled();
   await page.getByRole("button", { name: "Plan again" }).click();
   await expect(page.getByText(/changed since the last plan/)).toHaveCount(0);
+
   const order = await page.locator(".track .track-name").allTextContents();
   expect(order).toEqual(["one.wav", "three.wav", "two.wav"]);
   await expect(page.getByRole("region", { name: "Transition 1" })).toContainText("one.wav → three.wav");
+
+  // shuffle: a different order, and the transitions are already recalculated (no "plan again" needed)
+  const trackOrder = async () => (await page.locator(".tracks .track-name").allTextContents()).join(",");
+  const beforeShuffle = await trackOrder();
+  await page.getByRole("button", { name: /Shuffle/ }).click();
+  await expect.poll(trackOrder).not.toBe(beforeShuffle);
+  await expect(page.getByText(/changed since the last plan/)).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Transition 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Render the mix" })).toBeEnabled();
 
   // render and download
   await page.getByRole("button", { name: "Render the mix" }).click();

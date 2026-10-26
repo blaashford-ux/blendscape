@@ -207,3 +207,6 @@ label.radio { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .machine-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 4px; }
 .machine-row .field.wide { flex: 1; }
 .machine-row .field.wide input { width: 100%; }
+
+.track-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.track-list-head h2 { margin: 0; }
