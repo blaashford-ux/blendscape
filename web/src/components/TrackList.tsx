@@ -49,6 +49,12 @@ export function TrackList({ project, onProject, onTracksChanged, disabled }: Pro
       onProject(await api.reorder(project.id, order));
     });
 
+  const shuffle = () => {
+    const edited = project.plan?.transitions.filter((t) => t.edited).length ?? 0;
+    if (edited > 0 && !window.confirm(`Shuffling plans the transitions again, so your edits to ${edited === 1 ? "a transition" : `${edited} transitions`} will be lost unless the same two songs end up next to each other. Shuffle anyway?`)) return;
+    void guard(async () => onProject(await api.shuffle(project.id)));
+  };
+
   const remove = (t: TrackView) =>
     guard(async () => {
       await api.deleteTrack(project.id, t.id);
@@ -118,7 +124,16 @@ export function TrackList({ project, onProject, onTracksChanged, disabled }: Pro
       onDrop={onDropList}
       aria-label="Tracks"
     >
-      <h2>Tracks</h2>
+      <div className="track-list-head">
+        <h2>Tracks</h2>
+        <button
+          disabled={disabled || project.tracks.length < 2}
+          onClick={shuffle}
+          title="Put the songs in a random order and plan the transitions again"
+        >
+          🔀 Shuffle
+        </button>
+      </div>
       {project.tracks.length === 0 && (
         <p className="hint">Add the songs you want to blend, in the order you want to hear them. Drop audio files here.</p>
       )}

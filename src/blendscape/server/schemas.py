@@ -63,6 +63,10 @@ class OrderIn(BaseModel):
     order: list[str]
 
 
+class ShuffleIn(BaseModel):
+    seed: int | None = None  # for a repeatable shuffle (mostly for tests)
+
+
 class DownbeatIn(BaseModel):
     downbeat: int | None = Field(None, ge=0, le=3)  # null clears the override
 

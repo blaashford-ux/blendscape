@@ -128,7 +128,7 @@ Open the page, name a mix, drop in your songs (or add them by file path), and it
   nudge buttons, set the overlap, choose
   bass-swap or plain crossfade, **reset** an edited transition to what the planner first suggested, fine-tune the frequency swap, try the planner's other choices, and **preview** just that
   transition before rendering anything.
-- **Tracks**: drag to reorder; each shows how sure the bar line is, with buttons to shift it and a click-track to check
+- **Tracks**: drag to reorder, or press **Shuffle** for a random order with the transitions planned again; each shows how sure the bar line is, with buttons to shift it and a click-track to check
   it by ear.
 - **Render the mix** when you're happy; the WAV is listed under "Rendered mixes" to play or download, and
   (Settings → *This computer*) a copy can also be saved to a folder you choose. Mixes live in

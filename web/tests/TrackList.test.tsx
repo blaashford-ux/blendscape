@@ -14,6 +14,7 @@ vi.mock("../src/api/client", async (orig) => {
     api: {
       ...real.api,
       reorder: vi.fn(),
+      shuffle: vi.fn(),
       deleteTrack: vi.fn(),
       setDownbeat: vi.fn(),
       addTrackByPath: vi.fn(),
@@ -34,6 +35,7 @@ const setup = (p = project()) => {
 
 beforeEach(() => {
   vi.mocked(api.reorder).mockResolvedValue(project());
+  vi.mocked(api.shuffle).mockResolvedValue(project());
   vi.mocked(api.deleteTrack).mockResolvedValue(undefined);
   vi.mocked(api.setDownbeat).mockResolvedValue(project());
   vi.mocked(api.addTrackByPath).mockResolvedValue(track(9));
@@ -56,6 +58,32 @@ describe("TrackList", () => {
     await waitFor(() => expect(onProject).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("button", { name: "Move song0.wav down" }));
     expect(api.reorder).toHaveBeenLastCalledWith("p_abc123", ["t_1", "t_0", "t_2"]);
+  });
+
+  it("shuffles the order and hands back the project with its transitions recalculated", async () => {
+    const { onProject } = setup();
+    await userEvent.click(screen.getByRole("button", { name: /Shuffle/ }));
+    expect(api.shuffle).toHaveBeenCalledWith("p_abc123");
+    await waitFor(() => expect(onProject).toHaveBeenCalled());
+  });
+
+  it("needs two songs to shuffle", () => {
+    setup(project({}, 1));
+    expect(screen.getByRole("button", { name: /Shuffle/ })).toBeDisabled();
+  });
+
+  it("asks before shuffling away hand-edited transitions, and does nothing if you say no", async () => {
+    const p = project();
+    p.plan!.transitions[0].edited = true;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    setup(p);
+    await userEvent.click(screen.getByRole("button", { name: /Shuffle/ }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("a transition"));
+    expect(api.shuffle).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: /Shuffle/ }));
+    expect(api.shuffle).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
   });
 
   it("cannot move the first track up or the last one down", () => {
